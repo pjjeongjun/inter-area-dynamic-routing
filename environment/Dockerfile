@@ -1,4 +1,4 @@
-# hash:sha256:fbb8cf42108f3b9842523967c1691f8152553d4c9ee04a618f990b49d0713330
+# hash:sha256:710b25faaca3b1fe5938cfcf307a0ed715f30885609b3a1d70f3d118993c8b7a
 ARG REGISTRY_HOST
 FROM $REGISTRY_HOST/codeocean/swdb:Python3.12code-server4.133bedrock-auth0.5.0
 
@@ -13,6 +13,7 @@ RUN conda install -y \
 RUN pip install -U --no-cache-dir \
     aind-data-access-api==1.10.0 \
     hdmf-zarr==0.13.0 \
+    ipympl \
     matplotlib==3.11.1 \
     numpy==2.5.2 \
     pandas==3.0.5 \
