@@ -30,6 +30,9 @@
 					"version": "3.11.1"
 				},
 				{
+					"name": "nbstripout"
+				},
+				{
 					"name": "numpy",
 					"version": "2.5.2"
 				},
@@ -42,8 +45,14 @@
 					"version": "4.1.0"
 				},
 				{
+					"name": "scikit-learn"
+				},
+				{
 					"name": "scipy",
 					"version": "1.18.1"
+				},
+				{
+					"name": "seaborn"
 				}
 			],
 			"options": {},
