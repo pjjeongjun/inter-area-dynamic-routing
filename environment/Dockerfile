@@ -14,8 +14,8 @@ RUN pip install -U --no-cache-dir \
     aind-data-access-api==1.10.0 \
     hdmf-zarr==0.13.0 \
     matplotlib==3.11.1 \
+    nbstripout \
     numpy==2.5.2 \
     pandas==3.0.5 \
     pynwb==4.1.0 \
-    scipy==1.18.1 \
-    seaborn==0.13.2
+    scipy==1.18.1
