@@ -4,6 +4,9 @@
 /scratch/
 metadata/metadata.yml
 
+# Individual analysis code
+/code/notebooks/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -151,3 +154,4 @@ dmypy.json
 !.vscode/launch.json
 !.vscode/extensions.json
 !.vscode/*.code-snippets
+.vscode
