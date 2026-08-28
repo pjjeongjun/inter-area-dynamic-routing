@@ -1,3 +1,3 @@
-# swdb-capsule-template
+# Inter-area dynamic routing
 
-SWDB 2026 capsule template
+Repo for exploring inter-areal communication in the Allen Dynamic Routing dataset.

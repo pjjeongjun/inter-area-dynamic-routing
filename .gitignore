@@ -4,6 +4,9 @@
 /scratch/
 metadata/metadata.yml
 
+# Individual analysis code
+/code/notebooks/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
