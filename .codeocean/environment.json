@@ -44,6 +44,10 @@
 				{
 					"name": "scipy",
 					"version": "1.18.1"
+				},
+				{
+					"name": "seaborn",
+					"version": "0.13.2"
 				}
 			],
 			"options": {},
