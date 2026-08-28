@@ -26,6 +26,9 @@
 					"version": "0.13.0"
 				},
 				{
+					"name": "ipympl"
+				},
+				{
 					"name": "matplotlib",
 					"version": "3.11.1"
 				},
