@@ -5,6 +5,10 @@
 metadata/metadata.yml
 
 # Individual analysis code
+# Generated analysis artifacts and local run configurations
+/code/results/
+/code/configs/
+/code/archive/
 /code/notebooks/
 
 # Byte-compiled / optimized / DLL files
