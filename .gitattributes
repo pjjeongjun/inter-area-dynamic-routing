@@ -1,0 +1,5 @@
+# Store notebooks without their embedded figure output.
+# Enable the filter once per clone (see code/tools/nbstrip.py):
+#   git config filter.nbstrip.clean "python code/tools/nbstrip.py"
+#   git config filter.nbstrip.smudge cat
+*.ipynb filter=nbstrip

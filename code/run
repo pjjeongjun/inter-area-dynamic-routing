@@ -2,4 +2,8 @@
 set -ex
 
 # This is the master script for the capsule. When you click "Reproducible Run", the code in this file will execute.
+# run_capsule.py runs every notebook in code/notebooks once per session in the attached
+# datacube. By default only the all-pairs alignment notebook runs; set NOTEBOOKS (comma-
+# separated filenames) to run others, and SESSION_IDS to restrict the sessions.
+export NOTEBOOKS="${NOTEBOOKS:-task_axis_vs_communication_subspace_all_pairs.ipynb}"
 python -u run_capsule.py "$@"
