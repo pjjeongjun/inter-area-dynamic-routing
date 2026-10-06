@@ -81,8 +81,3 @@ pooled figures; the other sessions still run.
 
 `data/` and `results/` are gitignored. The notebooks read `DATACUBE_ROOT`, `SESSION_ID`
 and `RESULTS_DIR` from the environment, so the same files run locally and in the capsule.
-
-## Branches
-
-`main` is the working branch. `minni` holds Minni Sun's communication-subspace analyses
-(`code/analyses`, `code/src`, `notes/`) from September 2026 and is kept as is.
