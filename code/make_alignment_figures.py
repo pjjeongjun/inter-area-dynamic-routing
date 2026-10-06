@@ -32,8 +32,8 @@ plt.rcParams.update({
 
 GROUP_COLOR = {'frontal': '#1f6fb2', 'other': '#d9772b'}
 PAIR_TYPES = ['frontal->frontal', 'frontal->other', 'other->frontal', 'other->other']
-PAIR_LABEL = {'frontal->frontal': 'Frontal → Frontal', 'frontal->other': 'Frontal → Other',
-              'other->frontal': 'Other → Frontal', 'other->other': 'Other → Other'}
+PAIR_LABEL = {'frontal->frontal': 'Frontal → Frontal', 'frontal->other': 'Frontal → Others',
+              'other->frontal': 'Others → Frontal', 'other->other': 'Others → Others'}
 PAIR_COLOR = {'frontal->frontal': '#1f6fb2', 'frontal->other': '#6fb0dd',
               'other->frontal': '#e8a86a', 'other->other': '#d9772b'}
 EXTRA_PNG_DIR = os.environ.get('ALIGN_QC_DIR')  # optional PNG previews outside the results tree
@@ -48,11 +48,14 @@ def capitalize_labels(fig):
     titles and entries, and in-plot notes. Tick labels are capitalized at the source (PAIR_LABEL), since matplotlib re-creates them on every draw."""
     import re
 
-    def cap(s):  # every line; a lone statistic symbol (q < ..., p = ...) stays lower case
-        return '\n'.join(line if re.match(r'[^\W\d_](\s|$)', line) else line[:1].upper() + line[1:]
+    def cap(s):  # every line; a lone statistic symbol (q < ..., p = ...) and 'n.s.' stay lower case
+        return '\n'.join(line if re.match(r'[^\W\d_](\s|$)|n\.s\.$', line) else line[:1].upper() + line[1:]
                          for line in s.split('\n'))
     for ax in fig.axes:
-        texts = [ax.xaxis.label, ax.yaxis.label, ax._left_title, ax.title, ax._right_title] + list(ax.texts)
+        for text in (ax.xaxis.label, ax.yaxis.label):  # one label: only its first line (the rest continue it)
+            first, _, rest = text.get_text().partition('\n')
+            text.set_text(cap(first) + ('\n' + rest if rest else ''))
+        texts = [ax._left_title, ax.title, ax._right_title] + list(ax.texts)
         legend = ax.get_legend()
         if legend is not None:
             texts += [legend.get_title()] + list(legend.get_texts())
@@ -82,10 +85,13 @@ def _cap_height_pt(size, weight):
 
 
 def place_letters(fig, axes, letters, dx=None):
-    """Bold capital panel letters, aligned: each letter is left-aligned with its panel's y-axis label, letters are snapped
-    to shared columns, and each letter's cap top is level with the cap top of the first line of its panel title (shared
-    across a row of letters). Also capitalizes the axis labels. dx is kept for compatibility and ignored."""
+    """Bold capital panel letters, aligned: y-axis labels of panels in the same grid column are aligned first, then each
+    letter is left-aligned with the outer edge of its panel's y-axis label, and each letter's cap top is level with the
+    cap top of the first line of its panel title (shared across a row of letters). Also capitalizes the axis labels.
+    dx is kept for compatibility and ignored."""
     capitalize_labels(fig)
+    fig.canvas.draw()
+    fig.align_ylabels([ax for ax in axes if ax.get_subplotspec() is not None])
     fig.canvas.draw()
     r = fig.canvas.get_renderer()
     from matplotlib.font_manager import FontProperties
@@ -122,7 +128,6 @@ def place_letters(fig, axes, letters, dx=None):
             out[g] = agg(vals[g])
         return out
 
-    xs = snap(xs, 0.05 * fig.bbox.width, np.min)
     row_tops = snap(cap_tops, 0.3 * fig.dpi, np.max)  # one top per row: the highest first-line cap top
     for ax, title, top, own in zip(axes, titles, row_tops, cap_tops):
         if title is not None and top - own > 0.5:  # titles only move up, level with the row's highest
@@ -135,6 +140,13 @@ def place_letters(fig, axes, letters, dx=None):
     for L, x, top in zip(letters, xs, row_tops):
         fx, fy = inv.transform((x, top - cap_height(letter_fp)))
         fig.text(fx, fy, L, fontproperties=letter_fp, ha='left', va='baseline')
+
+
+def plain_log_ticks(axis):
+    """Log-axis tick labels as plain decimals (0.01, 0.1) instead of powers of ten."""
+    from matplotlib.ticker import FuncFormatter, NullFormatter
+    axis.set_major_formatter(FuncFormatter(lambda v, _: f'{v:g}'))
+    axis.set_minor_formatter(NullFormatter())
 
 
 def save(fig, path: Path):
@@ -195,7 +207,7 @@ def heatmap(ax, m, cmap, vmin, vmax, fmt='{:.2f}', cbar_label='', marks=None, cb
 
 def group_legend(ax, loc='upper right', **kw):
     handles = [Line2D([], [], color=GROUP_COLOR[g], marker='s', ls='', ms=6,
-                      label={'frontal': 'frontal cortex', 'other': 'other (non-frontal)'}[g]) for g in GROUP_COLOR]
+                      label={'frontal': 'frontal cortex', 'other': 'others (non-frontal)'}[g]) for g in GROUP_COLOR]
     ax.legend(handles=handles, loc=loc, frameon=False, **kw)
 
 
@@ -226,113 +238,112 @@ def strip_by_type(ax, table, ycol, ylabel, zero_line=None, y_err=None, show_mean
 
 
 # ----------------------------------------------------------------------------- figure 1
+def task_axis_panels(axA, axB, at, areas, xlabels, colors, sessions_of=None, sessions=None, null_band=True):
+    """A: task-axis in-sample R² per area; B: leave-one-block-out decoding accuracy per area."""
+    x = np.arange(len(areas))
+    for ax, col, err, ylab in [(axA, 'task_r2', 'task_r2_sd', 'task-axis R²\n(variance of the projection explained by context)'),
+                               (axB, 'acc_cv', 'acc_cv_sd', 'context decoding accuracy\n(leave-one-block-out)')]:
+        for i, a in enumerate(areas):
+            rows = at[at['area'] == a] if 'area' in at else at.loc[[a]]
+            for _, r in rows.iterrows():
+                pred = r['acc_cv'] > r['acc_null_q975']
+                mk = MARKERS[sessions.index(r['session']) % len(MARKERS)] if sessions is not None else 'o'
+                ax.errorbar(i, r[col], yerr=r[err], fmt=mk, ms=6, color=colors[i], mfc=colors[i] if pred else 'white',
+                            mec=colors[i], mew=1.0, elinewidth=0.8, capsize=0, zorder=3)
+        ax.set_xticks(x)
+        ax.set_xticklabels(xlabels, rotation=45 if len(areas) > 6 else 0, ha='right' if len(areas) > 6 else 'center')
+        for lab, c in zip(ax.get_xticklabels(), colors):
+            lab.set_color(c)
+        ax.set_xlim(-0.6, len(areas) - 0.4)
+        ax.set_ylabel(ylab)
+        ax.set_xlabel('area')
+    axA.set_ylim(0, 1)
+    if null_band:
+        hi = at['acc_null_q975'].mean()
+        axB.fill_between([-0.6, len(areas) - 0.4], 1 - hi, hi, color='0.88', lw=0, zorder=0)
+    axB.axhline(0.5, color='k', ls='--', lw=0.7)
+    axB.set_ylim(min(0.2, at['acc_cv'].min() - at['acc_cv_sd'].max() - 0.03), 1.0)
+    n_pred = int((at['acc_cv'] > at['acc_null_q975']).sum())
+    axA.set_title('Task axis: in-sample R²\nfilled = predictive in B, open = not', loc='left')
+    axB.set_title(f'Task axis: predictive accuracy\n{n_pred}/{len(at)} above the label-shuffle null (grey band, 95%)',
+                  loc='left')
+
+
+def comm_significance(res, results_dir):
+    """(q-values aligned to res['pairs'], label) for the rank-d R² test if available, else the full-model test."""
+    q = r2_dim_significance(res, results_dir)
+    if q is not None:
+        return q, 'trial-shuffle null at rank d'
+    return res['pair_table']['r2_q'].values, 'trial-shuffle null, full model'
+
+
 def figure1(res, out_dir: Path):
     sid, areas = res['session_id'], res['areas']
     pt, at = res['pair_table'], res['area_table']
     n = res['min_units']
+    at = at.assign(session=sid) if 'session' not in at else at
 
-    fig = plt.figure(figsize=(11, 6.6))
-    gs = fig.add_gridspec(2, 3, height_ratios=[1, 1], width_ratios=[1, 1, 1], hspace=0.55, wspace=0.55,
-                          left=0.07, right=0.955, top=0.91, bottom=0.1)
+    fig = plt.figure(figsize=(9, 7.2))
+    gs = fig.add_gridspec(2, 2, hspace=0.55, wspace=0.45, left=0.09, right=0.95, top=0.9, bottom=0.1)
     axA = fig.add_subplot(gs[0, 0])
     axB = fig.add_subplot(gs[0, 1])
-    axC = fig.add_subplot(gs[0, 2])
-    axD = fig.add_subplot(gs[1, 0])
-    axE = fig.add_subplot(gs[1, 1])
-    axF = fig.add_subplot(gs[1, 2])
+    axC = fig.add_subplot(gs[1, 0])
+    axD = fig.add_subplot(gs[1, 1])
 
-    # A: example projection onto the task axis
-    ex = max(areas, key=lambda a: res['unit_counts'][a])  # area with the most available units
-    proj = res['proj_example'][ex]
-    ctx, blocks, tidx = res['context'], res['blocks'], np.arange(len(proj))
-    # orient the axis so that visual context is positive
-    sign = 1 if proj[ctx == 'vis'].mean() > proj[ctx == 'aud'].mean() else -1
-    proj = sign * proj
-    for b in np.unique(blocks):
-        idx = np.where(blocks == b)[0]
-        if ctx[idx[0]] == 'vis':
-            axA.axvspan(idx[0] - 0.5, idx[-1] + 0.5, color='#1f6fb2', alpha=0.07, lw=0)
-    for c, col, lab in [('vis', '#1f6fb2', 'visual-rewarded block'), ('aud', '#555555', 'auditory-rewarded block')]:
-        axA.scatter(tidx[ctx == c], proj[ctx == c], s=5, color=col, label=lab, lw=0)
-    axA.axhline(0, color='k', lw=0.6, ls=':')
-    axA.set_xlabel('stimulus trial (session order)')
-    axA.set_ylabel(f'projection onto task axis ({ex}, a.u.)')
-    axA.set_title(f'Task axis: LDA on quiescent activity\n{ex}, {n} units, subsample 0', loc='left')
-    axA.legend(loc='lower right', frameon=False, markerscale=2.5, handletextpad=0.2, ncol=1)
+    colors = [GROUP_COLOR[area_group(a)] for a in areas]
+    task_axis_panels(axA, axB, at, areas, areas, colors)
 
-    # B: decoding accuracy per area
-    x = np.arange(len(areas))
-    at_i = at.set_index('area').loc[areas]
-    null_hi = at_i['acc_null_q975'].values
-    axB.fill_between([-0.6, len(areas) - 0.4], 0.5 - (null_hi.max() - 0.5), null_hi.max(), color='0.88', lw=0,
-                     label='label-shuffle null (95%)')
-    axB.axhline(0.5, color='k', ls='--', lw=0.7)
-    for i, a in enumerate(areas):
-        col = GROUP_COLOR[area_group(a)]
-        axB.errorbar(i, at_i.loc[a, 'acc_cv'], yerr=at_i.loc[a, 'acc_cv_sd'], fmt='o', color=col, ms=6, capsize=0,
-                     elinewidth=1, zorder=3)
-        axB.plot(i, at_i.loc[a, 'acc_train'], marker='o', mfc='white', mec=col, ms=5, ls='', zorder=3)
-    axB.set_xticks(x)
-    axB.set_xticklabels(areas)
-    for lab, a in zip(axB.get_xticklabels(), areas):
-        lab.set_color(GROUP_COLOR[area_group(a)])
-    axB.set_xlim(-0.6, len(areas) - 0.4)
-    axB.set_ylim(min(0.25, at_i['acc_cv'].min() - at_i['acc_cv_sd'].max() - 0.03), 1.0)
-    axB.set_ylabel('context decoding accuracy')
-    axB.set_xlabel('area')
-    axB.set_title('Task axis is predictive\nleave-one-block-out decoding', loc='left')
-    h = [Line2D([], [], marker='o', color='k', ls='', ms=5, label='cross-validated (mean ± SD, subsamples)'),
-         Line2D([], [], marker='o', mfc='white', mec='k', ls='', ms=5, label='training'),
-         plt.Rectangle((0, 0), 1, 1, color='0.88', label='label-shuffle null (95% range)')]
-    axB.legend(handles=h, loc='lower left', frameon=False, handletextpad=0.4, bbox_to_anchor=(-0.02, -0.01))
-
-    # C: CV R^2 vs rank
-    curves = res['r2_curve'].mean(axis=0)
-    ranks = np.arange(1, n + 1)
-    for p, (s, t) in enumerate(res['pairs']):
-        typ = pt.iloc[p]['pair_type']
-        axC.plot(ranks, curves[p], color=PAIR_COLOR[typ], lw=0.9, alpha=0.9)
-        d = pt.iloc[p]['dim']
-        axC.plot(d, np.interp(d, ranks, curves[p]), marker='o', ms=3.2, color=PAIR_COLOR[typ], mec='k', mew=0.3, ls='')
-    axC.axhline(0, color='k', lw=0.6, ls=':')
-    axC.set_xlabel('number of predictive dimensions (rank)')
-    axC.set_ylabel('cross-validated R² (pooled over target units)')
-    axC.set_title('Communication subspace\ncross-validated R² vs. rank', loc='left')
-    axC.set_xlim(0.5, n + 0.5)
-    axC.text(0.98, 0.98, 'dot = 1-SEM dimensionality\ncolours = pair type (legend in F)', transform=axC.transAxes,
-             ha='right', va='top', fontsize=7)
-
-    # D: R^2 heatmap with significance
-    m_r2 = matrix(pt, areas, 'r2')
-    sig = matrix(pt, areas, 'r2_q').values <= FDR_ALPHA
+    # C, D: communication subspace R² at the 1-SEM dimensionality, in-sample and cross-validated, shared scale
+    m_tr = matrix(pt, areas, 'r2_train_dim')
+    m_cv = matrix(pt, areas, 'r2_cv_dim')
+    vmax = max(0.05, np.nanmax(m_tr.values))
+    heatmap(axC, m_tr, 'viridis', 0, vmax, fmt='{:.2f}', cbar_label='in-sample R²')
+    axC.set_title('Communication subspace: in-sample R²\nrank-d reduced-rank fit, pooled over target units', loc='left')
+    q, label = comm_significance(res, out_dir.parent.parent)
+    sig = matrix(pt.assign(q=q), areas, 'q').values <= FDR_ALPHA
     marks = np.where(sig, '', '†')
-    heatmap(axD, m_r2, 'viridis', 0, max(0.05, np.nanmax(m_r2.values)), fmt='{:.2f}',
-            cbar_label='cross-validated R² (full ridge)', marks=marks)
+    heatmap(axD, m_cv, 'viridis', 0, vmax, fmt='{:.2f}', cbar_label='cross-validated R²', marks=marks)
     n_sig = int(sig[~np.eye(len(areas), dtype=bool)].sum())
-    axD.set_title(f'Predictive R² of source → target\n{n_sig}/{len(pt)} pairs > trial-shuffle null (q < {FDR_ALPHA})'
+    short = 'rank-d' if 'rank d' in label else 'full-model'
+    axD.set_title(f'Communication subspace: predictive R²\n{n_sig}/{len(pt)} pairs > {short} shuffle null (q < {FDR_ALPHA})'
                   + ('; † = n.s.' if n_sig < len(pt) else ''), loc='left')
 
-    # E: dimensionality heatmap
-    m_d = matrix(pt, areas, 'dim')
-    heatmap(axE, m_d, 'Blues', 0, max(np.nanmax(m_d.values), 1), fmt='{:.1f}', cbar_label='dimensionality (1-SEM rule)')
-    axE.set_title(f'Dimensionality (of {n} source units)\nmean over subsamples', loc='left')
-
-    # F: dimensionality vs R^2 by pair type
-    for t in PAIR_TYPES:
-        sub = pt[pt['pair_type'] == t]
-        axF.errorbar(sub['r2'], sub['dim'], xerr=sub['r2_sd'], yerr=sub['dim_sd'], fmt='o', ms=4.5, color=PAIR_COLOR[t],
-                     mec='k', mew=0.3, elinewidth=0.6, capsize=0, label=PAIR_LABEL[t])
-    axF.set_xlabel('cross-validated R² (full ridge)')
-    axF.set_ylabel('dimensionality')
-    axF.set_ylim(0, max(8, m_d.values[np.isfinite(m_d.values)].max() + 4))
-    axF.set_title('Dimensionality vs. R²\nmean ± SD over subsamples', loc='left')
-    pair_legend(axF, loc='upper left')
-
     fig.suptitle(f'Figure 1. Task axis and communication subspace, session {sid} '
-                 f'({res["n_trials"]} stimulus trials, {res["n_blocks"]} blocks, quiescent window, {n} units per area, '
-                 f'{res["n_subsamples"]} subsamples)', fontsize=9, x=0.07, ha='left', y=0.985)
-    place_letters(fig, [axA, axB, axC, axD, axE, axF], 'ABCDEF')
+                 f'({res["n_trials"]} trials, {res["n_blocks"]} blocks, {n} units per area)', fontsize=9, x=0.09,
+                 ha='left', y=0.985)
+    place_letters(fig, [axA, axB, axC, axD], 'ABCD')
     save(fig, out_dir / f'figure1_{sid}.svg')
+
+
+def supp_figure1(res, out_dir: Path):
+    """Supplementary Figure 1: how the communication-subspace dimensionality is chosen."""
+    sid, areas = res['session_id'], res['areas']
+    pt = res['pair_table']
+    n = res['min_units']
+    fig = plt.figure(figsize=(9, 3.8))
+    gs = fig.add_gridspec(1, 2, wspace=0.45, left=0.09, right=0.95, top=0.82, bottom=0.18)
+    axA = fig.add_subplot(gs[0, 0])
+    axB = fig.add_subplot(gs[0, 1])
+    curves = res['r2_curve'].mean(axis=0)
+    ranks = np.arange(1, n + 1)
+    for p, (s_, t_) in enumerate(res['pairs']):
+        typ = pt.iloc[p]['pair_type']
+        axA.plot(ranks, curves[p], color=PAIR_COLOR[typ], lw=0.9, alpha=0.9)
+        d = pt.iloc[p]['dim']
+        axA.plot(d, np.interp(d, ranks, curves[p]), marker='o', ms=3.2, color=PAIR_COLOR[typ], mec='k', mew=0.3, ls='')
+    axA.axhline(0, color='k', lw=0.6, ls=':')
+    axA.set_xlim(0.5, n + 0.5)
+    axA.set_xlabel('number of predictive dimensions (rank)')
+    axA.set_ylabel('cross-validated R² (pooled over target units)')
+    axA.set_title('Cross-validated R² vs. rank, every ordered pair\ndot = 1-SEM dimensionality; colours = pair type',
+                  loc='left')
+    m_d = matrix(pt, areas, 'dim')
+    heatmap(axB, m_d, 'Blues', 0, max(np.nanmax(m_d.values), 1), fmt='{:.1f}', cbar_label='dimensionality (1-SEM rule)')
+    axB.set_title(f'Dimensionality of the communication subspace\nof {n} source units, mean over subsamples', loc='left')
+    fig.suptitle(f'Supplementary Figure 1. Communication-subspace dimensionality, session {sid}', fontsize=9, x=0.09,
+                 ha='left', y=0.975)
+    place_letters(fig, [axA, axB], 'AB')
+    save(fig, out_dir / f'supp_figure1_{sid}.svg')
 
 
 # ----------------------------------------------------------------------------- figure 2
@@ -518,6 +529,7 @@ def strip_by_type_sessions(ax, tables, ycol, ylabel, zero_line=None, log=False, 
     ax.set_ylabel(ylabel)
     if log:
         ax.set_yscale('log')
+        plain_log_ticks(ax.yaxis)
     if zero_line is not None:
         ax.axhline(zero_line, color='k', ls='--', lw=0.7)
     counts = pooled['pair_type'].value_counts()
@@ -532,96 +544,105 @@ def area_order(areas):
     return sorted(areas, key=lambda a: (area_group(a) != 'frontal', a))
 
 
+def r2_at_dimensionality(res):
+    """Per pair: cross-validated R² of the reduced-rank model at the pair's own 1-SEM dimensionality, taken per
+    subsample (rank = that subsample's dimensionality) and averaged over subsamples."""
+    curves, dims = res['r2_curve'], res['dims']                 # (K, pairs, ranks), (K, pairs); ranks are 1-based
+    K, P = dims.shape
+    return np.array([curves[np.arange(K), p, dims[:, p] - 1].mean() for p in range(P)])
+
+
+def r2_dim_significance(res, results_dir: Path):
+    """FDR q-values of the rank-d R² against its own trial-shuffle null (r2_dim_null.py), aligned to res['pairs'];
+    None if that file has not been computed for this session."""
+    f = results_dir / res['session_id'] / 'r2_dim_significance.csv'
+    if not f.exists():
+        return None
+    sig = pd.read_csv(f).set_index(['source', 'target'])
+    return sig.loc[res['pairs'], 'r2_dim_q'].values
+
+
 def figure1_pooled(results, out_dir: Path):
     sessions = [r['session_id'] for r in results]
     tables = [qualify(r) for r in results]
+    q_dim = [r2_dim_significance(r, out_dir.parent) for r in results]
+    rank_d_test = all(q is not None for q in q_dim)
+    if rank_d_test:
+        tables = [t.assign(r2_sig_dim=(q <= FDR_ALPHA)) for t, q in zip(tables, q_dim)]
+    else:
+        tables = [t.assign(r2_sig_dim=t['r2_significant']) for t in tables]
     pooled = pd.concat(tables, ignore_index=True)
     areas_tab = pd.concat([r['area_table'] for r in results], ignore_index=True)
     n = results[0]['min_units']
 
     fig = plt.figure(figsize=(11, 7.4))
-    gs = fig.add_gridspec(2, 3, width_ratios=[1, 1, 1], hspace=0.5, wspace=0.45, left=0.07, right=0.98, top=0.89, bottom=0.09)
-    axA = fig.add_subplot(gs[0, 0:2])
-    axB = fig.add_subplot(gs[0, 2])
+    gs = fig.add_gridspec(2, 2, hspace=0.55, wspace=0.3, left=0.07, right=0.98, top=0.9, bottom=0.1)
+    axA = fig.add_subplot(gs[0, 0])
+    axB = fig.add_subplot(gs[0, 1])
     axC = fig.add_subplot(gs[1, 0])
     axD = fig.add_subplot(gs[1, 1])
-    axE = fig.add_subplot(gs[1, 2])
 
-    # A: decoding accuracy per area, every session
     order = area_order(areas_tab['area'].unique())
-    null_hi = areas_tab['acc_null_q975'].mean()
-    axA.fill_between([-0.6, len(order) - 0.4], 1 - null_hi, null_hi, color='0.88', lw=0)
-    axA.axhline(0.5, color='k', ls='--', lw=0.7)
-    for i, a in enumerate(order):
-        sub = areas_tab[areas_tab['area'] == a]
-        for _, r in sub.iterrows():
-            k = sessions.index(r['session'])
-            pred = r['acc_cv'] > r['acc_null_q975']
-            col = GROUP_COLOR[area_group(a)]
-            axA.errorbar(i, r['acc_cv'], yerr=r['acc_cv_sd'], fmt=MARKERS[k % len(MARKERS)], ms=6, color=col,
-                         mfc=col if pred else 'white', mec=col, mew=1.0, elinewidth=0.8, capsize=0, zorder=3)
-    axA.set_xticks(range(len(order)))
-    axA.set_xticklabels(order, rotation=45, ha='right')
-    for lab, a in zip(axA.get_xticklabels(), order):
-        lab.set_color(GROUP_COLOR[area_group(a)])
-    axA.set_xlim(-0.6, len(order) - 0.4)
-    axA.set_ylim(min(0.2, areas_tab['acc_cv'].min() - 0.08), 1.0)
-    axA.set_ylabel('context decoding accuracy\n(leave-one-block-out,\nmean ± SD over subsamples)')
+    colors = [GROUP_COLOR[area_group(a)] for a in order]
+    task_axis_panels(axA, axB, areas_tab, order, order, colors, sessions=sessions)
     axA.set_xlabel('area (frontal left, others right); one marker per session')
-    n_pred = int((areas_tab['acc_cv'] > areas_tab['acc_null_q975']).sum())
-    axA.set_title(f'Task axis: predictive in {n_pred} of {len(areas_tab)} area instances '
-                  f'(filled = above label-shuffle null, open = not)', loc='left')
-    session_legend(axA, sessions, loc='lower right')
-    axA.text(0.01, 0.03, 'grey band = label-shuffle null, 95% range', transform=axA.transAxes, fontsize=7)
+    axB.set_xlabel('area (frontal left, others right); one marker per session')
+    session_legend(axA, sessions, loc='upper right')
 
-    # B: CV R^2 vs rank, every pair of every session
-    ranks = np.arange(1, n + 1)
-    for res, tab in zip(results, tables):
-        curves = res['r2_curve'].mean(axis=0)
-        for p, (s_, t_) in enumerate(res['pairs']):
-            typ = tab.iloc[p]['pair_type']
-            axB.plot(ranks, curves[p], color=PAIR_COLOR[typ], lw=0.6, alpha=0.8)
-            d = tab.iloc[p]['dim']
-            axB.plot(d, np.interp(d, ranks, curves[p]), marker='o', ms=2.6, color=PAIR_COLOR[typ], mec='k', mew=0.3, ls='')
-    axB.axhline(0, color='k', lw=0.6, ls=':')
-    axB.set_xlim(0.5, n + 0.5)
-    axB.set_xlabel('number of predictive dimensions (rank)')
-    axB.set_ylabel('cross-validated R² (pooled over target units)')
-    axB.set_title(f'Communication subspace: R² vs. rank\n{len(pooled)} ordered pairs, dot = 1-SEM dim.', loc='left')
-    axB.text(0.98, 0.98, 'colours = pair type (as in C)', transform=axB.transAxes, ha='right', va='top', fontsize=7)
-
-    # C: full R^2 by pair type
-    strip_by_type_sessions(axC, tables, 'r2', 'cross-validated R² (full ridge)', log=True, show_n=False)
-    n_sig = int(pooled['r2_significant'].sum())
-    axC.set_title(f'Predictive R² by pair type\n{n_sig}/{len(pooled)} pairs > trial-shuffle null (q < {FDR_ALPHA})',
-                  loc='left')
-
-    # D: dimensionality by pair type
-    strip_by_type_sessions(axD, tables, 'dim', f'dimensionality (of {n} source units)')
-    axD.set_ylim(0, max(12, pooled['dim'].max() + 3))
-    axD.set_title(f'Dimensionality by pair type\nmedian {pooled["dim"].median():.1f}, range {pooled["dim"].min():.1f}'
-                  f'–{pooled["dim"].max():.1f}', loc='left')
-
-    # E: dimensionality vs R^2
-    for k, tab in enumerate(tables):
-        for t in PAIR_TYPES:
-            sub = tab[tab['pair_type'] == t]
-            axE.scatter(sub['r2'], sub['dim'], s=18, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[t],
-                        edgecolor='k', linewidth=0.3)
-    from scipy import stats
-    rho, pval = stats.spearmanr(pooled['r2'], pooled['dim'])
-    axE.set_xscale('log')
-    axE.set_xlabel('cross-validated R² (full ridge)')
-    axE.set_ylabel('dimensionality')
-    axE.set_ylim(0, max(10, pooled['dim'].max() + 2))
-    axE.set_title(f'Dimensionality vs. R²\nSpearman ρ = {rho:.2f}, p = {pval:.2g}', loc='left')
-    session_legend(axE, sessions, loc='upper left')
+    # C, D: communication subspace R² at the 1-SEM dimensionality, by pair type, shared log scale
+    lo = min(pooled['r2_train_dim'].min(), pooled['r2_cv_dim'].min())
+    use_log = lo > 0
+    strip_by_type_sessions(axC, tables, 'r2_train_dim', 'in-sample R² (rank-d fit)', log=use_log, show_n=True)
+    strip_by_type_sessions(axD, tables, 'r2_cv_dim', 'cross-validated R² (rank-d fit)', log=use_log, show_n=False)
+    hi = max(pooled['r2_train_dim'].max(), pooled['r2_cv_dim'].max()) * 1.3
+    for ax in (axC, axD):
+        ax.set_ylim(lo * 0.7 if use_log else min(0, lo) - 0.01, hi)
+        if use_log:
+            plain_log_ticks(ax.yaxis)
+    axC.set_title('Communication subspace: in-sample R²\nreduced-rank fit at the 1-SEM dimensionality', loc='left')
+    n_sig = int(pooled['r2_sig_dim'].sum())
+    label = 'rank d' if rank_d_test else 'full model'
+    axD.set_title(f'Communication subspace: predictive R²\n{n_sig}/{len(pooled)} pairs > trial-shuffle null '
+                  f'({label}, q < {FDR_ALPHA})', loc='left')
 
     fig.suptitle(f'Figure 1 (pooled). Task axis and communication subspace over {len(results)} sessions: '
                  f'{len(areas_tab)} area instances ({areas_tab["area"].nunique()} distinct areas), {len(pooled)} ordered pairs, '
                  f'{n} units per area', fontsize=9, x=0.07, ha='left', y=0.98)
-    place_letters(fig, [axA, axB, axC, axD, axE], 'ABCDE', dx=-0.05)
+    place_letters(fig, [axA, axB, axC, axD], 'ABCD')
     save(fig, out_dir / 'figure1_pooled.svg')
+
+
+def supp_figure1_pooled(results, out_dir: Path):
+    sessions = [r['session_id'] for r in results]
+    tables = [qualify(r) for r in results]
+    pooled = pd.concat(tables, ignore_index=True)
+    n = results[0]['min_units']
+    fig = plt.figure(figsize=(9, 3.8))
+    gs = fig.add_gridspec(1, 2, wspace=0.4, left=0.09, right=0.97, top=0.82, bottom=0.2)
+    axA = fig.add_subplot(gs[0, 0])
+    axB = fig.add_subplot(gs[0, 1])
+    ranks = np.arange(1, n + 1)
+    for res, tab in zip(results, tables):
+        curves = res['r2_curve'].mean(axis=0)
+        for p in range(len(res['pairs'])):
+            typ = tab.iloc[p]['pair_type']
+            axA.plot(ranks, curves[p], color=PAIR_COLOR[typ], lw=0.5, alpha=0.8)
+            d = tab.iloc[p]['dim']
+            axA.plot(d, np.interp(d, ranks, curves[p]), marker='o', ms=2.4, color=PAIR_COLOR[typ], mec='k', mew=0.3, ls='')
+    axA.axhline(0, color='k', lw=0.6, ls=':')
+    axA.set_xlim(0.5, n + 0.5)
+    axA.set_xlabel('number of predictive dimensions (rank)')
+    axA.set_ylabel('cross-validated R² (pooled over target units)')
+    axA.set_title(f'Cross-validated R² vs. rank, {len(pooled)} ordered pairs\ndot = 1-SEM dimensionality; colours = pair '
+                  f'type (as in B)', loc='left')
+    strip_by_type_sessions(axB, tables, 'dim', f'dimensionality (of {n} source units)')
+    axB.set_ylim(0, max(12, pooled['dim'].max() + 3))
+    axB.set_title(f'Dimensionality by pair type\nmedian {pooled["dim"].median():.1f}, range {pooled["dim"].min():.1f}'
+                  f'–{pooled["dim"].max():.1f}', loc='left')
+    fig.suptitle(f'Supplementary Figure 1 (pooled). Communication-subspace dimensionality over {len(results)} sessions',
+                 fontsize=9, x=0.09, ha='left', y=0.975)
+    place_letters(fig, [axA, axB], 'AB')
+    save(fig, out_dir / 'supp_figure1_pooled.svg')
 
 
 def figure2_pooled(results, out_dir: Path):
@@ -634,56 +655,33 @@ def figure2_pooled(results, out_dir: Path):
     tables_t = [t[t['qualified_tgt']] for t in tables_all]
     pooled_t = pooled_all[pooled_all['qualified_tgt']]
     from scipy import stats
+    ylab = 'cosine(task axis, comm. subspace) − chance'
 
     fig = plt.figure(figsize=(11, 7.4))
-    gs = fig.add_gridspec(2, 3, width_ratios=[1, 1, 1], hspace=0.5, wspace=0.45, left=0.07, right=0.98, top=0.89, bottom=0.09)
-    axA = fig.add_subplot(gs[0, 0])
-    axB = fig.add_subplot(gs[0, 1])
-    axC = fig.add_subplot(gs[0, 2])
-    axD = fig.add_subplot(gs[1, 0:2])
-    axE = fig.add_subplot(gs[1, 2])
-
-    # A: observed vs chance, source side, qualified
-    for k, t in enumerate(tables):
-        for typ in PAIR_TYPES:
-            sub = t[t['pair_type'] == typ]
-            axA.scatter(sub['cos_chance'], sub['cos'], s=18, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[typ],
-                        edgecolor='k', linewidth=0.3)
-    axA.plot([0, 1], [0, 1], 'k--', lw=0.7)
-    axA.set_xlim(0, 1)
-    axA.set_ylim(0, 1)
-    axA.set_aspect('equal')
-    axA.set_xlabel('chance (random axis in same subspace)')
-    axA.set_ylabel('observed cosine')
+    gs = fig.add_gridspec(2, 2, width_ratios=[1, 1], hspace=0.5, wspace=0.3, left=0.07, right=0.98, top=0.89, bottom=0.09)
+    axC = fig.add_subplot(gs[0, :])
+    axB = fig.add_subplot(gs[1, 0])
     n_up = int(((pooled['cos_q_random'] <= FDR_ALPHA) & (pooled['cos_z_random'] > 0)).sum())
-    n_dn = int(((pooled['cos_q_random'] <= FDR_ALPHA) & (pooled['cos_z_random'] < 0)).sum())
-    axA.set_title(f'Source task axis in comm. subspace\n{n_up} above / {n_dn} below chance of {len(pooled)} qualified pairs',
-                  loc='left')
-    session_legend(axA, sessions, loc='lower right')
 
-    # B: by pair type
-    strip_by_type_sessions(axB, tables, 'cos_z_random', 'z-score vs. random-axis null', zero_line=0, text_loc=0.08)
-    axB.set_title('By pair type\nz-score of the subsample-averaged cosine', loc='left')
-
-    # C: target side observed vs chance
-    for k, t in enumerate(tables_t):
-        for typ in PAIR_TYPES:
-            sub = t[t['pair_type'] == typ]
-            axC.scatter(sub['cos_tgt_chance'], sub['cos_tgt'], s=18, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[typ],
+    # B: the same excess vs source-axis accuracy, qualified pairs only
+    for k, t in enumerate(tables):
+        for g in GROUP_COLOR:
+            sub = t[[area_group(a) == g for a in t['source']]]
+            axB.scatter(sub['source_acc_cv'], sub['excess'], s=18, marker=MARKERS[k % len(MARKERS)], color=GROUP_COLOR[g],
                         edgecolor='k', linewidth=0.3)
-    axC.plot([0, 1], [0, 1], 'k--', lw=0.7)
-    axC.set_xlim(0, 1)
-    axC.set_ylim(0, 1)
-    axC.set_aspect('equal')
-    axC.set_xlabel('chance (random axis in predicted dims)')
-    axC.set_ylabel('observed cosine (target task axis)')
-    n_up = int(((pooled_t['cos_tgt_q_random'] <= FDR_ALPHA) & (pooled_t['cos_tgt_z_random'] > 0)).sum())
-    n_dn = int(((pooled_t['cos_tgt_q_random'] <= FDR_ALPHA) & (pooled_t['cos_tgt_z_random'] < 0)).sum())
-    axC.set_title(f'Target side: task axis in predicted dims\n{n_up} above / {n_dn} below chance of {len(pooled_t)} qualified',
+    axB.axhline(0, color='k', ls='--', lw=0.7)
+    rho, pval = stats.spearmanr(pooled['source_acc_cv'], pooled['excess'])
+    fit = stats.linregress(pooled['source_acc_cv'], pooled['excess'])
+    xfit = np.array([pooled['source_acc_cv'].min(), pooled['source_acc_cv'].max()])
+    axB.plot(xfit, fit.intercept + fit.slope * xfit, color='k', lw=1.2, zorder=4)
+    axB.set_xlabel('source task axis: leave-one-block-out decoding accuracy')
+    axB.set_ylabel(ylab)
+    axB.set_ylim(-0.3, max(0.7, pooled['excess'].max() + 0.05))
+    axB.set_title(f'Alignment vs. context decoding of the source area\nSpearman ρ = {rho:.2f}, p = {pval:.2f}; line = least squares',
                   loc='left')
-    pair_legend(axC, loc='lower right')
+    group_legend(axB, loc='lower right', ncol=2)
 
-    # D: by area, as source and as target
+    # C: the same excess by area, as source and as target
     pooled_all = pooled_all.assign(excess_tgt=pooled_all['cos_tgt'] - pooled_all['cos_tgt_chance'])
     order = area_order(set(pooled['source']) | set(pooled_t['target']))
     rng = np.random.default_rng(0)
@@ -694,55 +692,74 @@ def figure2_pooled(results, out_dir: Path):
         for vals, dx, marker, alpha in [(src, -0.18, 'o', 1.0), (tgt, 0.18, 's', 0.65)]:
             if len(vals) == 0:
                 continue
-            axD.scatter(i + dx + rng.uniform(-0.08, 0.08, len(vals)), vals, s=13, marker=marker, color=col,
+            axC.scatter(i + dx + rng.uniform(-0.08, 0.08, len(vals)), vals, s=13, marker=marker, color=col,
                         edgecolor='k', linewidth=0.3, zorder=3, alpha=alpha)
-            axD.plot([i + dx - 0.14, i + dx + 0.14], [vals.mean()] * 2, color='k', lw=1.4, zorder=4)
-    axD.axhline(0, color='k', ls='--', lw=0.7)
-    axD.set_xticks(range(len(order)))
-    axD.set_xticklabels(order, rotation=45, ha='right')
-    for lab, a in zip(axD.get_xticklabels(), order):
+            axC.plot([i + dx - 0.14, i + dx + 0.14], [vals.mean()] * 2, color='k', lw=1.4, zorder=4)
+    axC.axhline(0, color='k', ls='--', lw=0.7)
+    axC.set_xticks(range(len(order)))
+    axC.set_xticklabels(order, rotation=45, ha='right')
+    for lab, a in zip(axC.get_xticklabels(), order):
         lab.set_color(GROUP_COLOR[area_group(a)])
-    axD.set_xlim(-0.6, len(order) - 0.4)
-    axD.set_ylabel('observed − chance cosine')
-    axD.set_xlabel('area (frontal left, others right); points = partners × sessions, black = mean')
-    axD.set_title('By area, qualified pairs only (areas with a predictive task axis)\nas source (●, its task axis '
-                  'in the comm. subspace) and as target (■, its task axis in the predicted dims)', loc='left')
-    ymax = max(pooled_all['excess'].max(), pooled_all['excess_tgt'].max())
-    axD.set_ylim(-0.25 * ymax, ymax * 1.1)
+    axC.set_xlim(-0.6, len(order) - 0.4)
+    axC.set_ylabel(ylab)
+    axC.set_xlabel('area (frontal left, others right); points = partner areas × sessions, black = mean')
+    axC.set_title(f'Alignment by area, as source (●) and as target (■)\n{n_up}/{len(pooled)} qualified pairs above chance',
+                  loc='left')
+    ymax = max(pooled['excess'].max(), pooled_t['excess_tgt'].max() if 'excess_tgt' in pooled_t else 0)
+    axC.set_ylim(-0.12, max(0.7, ymax + 0.05))
     h = [Line2D([], [], marker='o', color='0.4', ls='', ms=5, label='as source'),
          Line2D([], [], marker='s', color='0.4', ls='', ms=5, alpha=0.65, label='as target'),
          Line2D([], [], color='k', lw=1.4, label='mean')]
-    axD.legend(handles=h, loc='lower left', frameon=False, ncol=3, columnspacing=1.2, handletextpad=0.4,
-               bbox_to_anchor=(-0.01, -0.01))
-
-    # E: alignment vs task-axis predictive accuracy
-    for k, t in enumerate(tables_all):
-        for g in GROUP_COLOR:
-            sub = t[[area_group(a) == g for a in t['source']]]
-            q = sub['qualified'].values
-            axE.scatter(sub['source_acc_cv'][q], sub['excess'][q], s=18, marker=MARKERS[k % len(MARKERS)],
-                        color=GROUP_COLOR[g], edgecolor='k', linewidth=0.3)
-            axE.scatter(sub['source_acc_cv'][~q], sub['excess'][~q], s=18, marker=MARKERS[k % len(MARKERS)],
-                        color='white', edgecolor=GROUP_COLOR[g], linewidth=0.6)
-    axE.axvline(pooled_all['source_acc_null_q975'].mean(), color='k', ls='--', lw=0.7)
-    axE.axhline(0, color='k', ls=':', lw=0.7)
-    rho, pval = stats.spearmanr(pooled['source_acc_cv'], pooled['excess'])
-    axE.set_xlabel('source task axis: decoding accuracy')
-    axE.set_ylabel('observed − chance cosine')
-    axE.set_title(f'Alignment vs. task-axis accuracy\nρ = {rho:.2f}, p = {pval:.2f}; open = excluded', loc='left')
-    axE.set_ylim(-0.25 * ymax, ymax * 1.1)
-    group_legend(axE, loc='lower right')
+    axC.legend(handles=h, loc='lower left', frameon=False, ncol=3, columnspacing=1.2, handletextpad=0.4)
 
     fig.suptitle(f'Figure 2 (pooled). Alignment over {len(results)} sessions: {len(pooled)} of {len(pooled_all)} ordered '
-                 f'pairs qualify (source task axis predictive and R² significant); random-axis null',
+                 f'pairs qualify (source task axis predictive, R² significant); chance = random axis',
                  fontsize=9, x=0.07, ha='left', y=0.98)
-    place_letters(fig, [axA, axB, axC, axD, axE], 'ABCDE', dx=-0.05)
+    place_letters(fig, [axC, axB], 'AB')
     save(fig, out_dir / 'figure2_pooled.svg')
+
+    # Supplementary Figure 2: observed vs chance, source and target side
+    fig = plt.figure(figsize=(9, 4.2))
+    gs = fig.add_gridspec(1, 2, wspace=0.4, left=0.09, right=0.97, top=0.82, bottom=0.15)
+    axA, axB = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])
+    for k, t in enumerate(tables):
+        for typ in PAIR_TYPES:
+            sub = t[t['pair_type'] == typ]
+            axA.scatter(sub['cos_chance'], sub['cos'], s=18, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[typ],
+                        edgecolor='k', linewidth=0.3)
+    for k, t in enumerate(tables_t):
+        for typ in PAIR_TYPES:
+            sub = t[t['pair_type'] == typ]
+            axB.scatter(sub['cos_tgt_chance'], sub['cos_tgt'], s=18, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[typ],
+                        edgecolor='k', linewidth=0.3)
+    for ax in (axA, axB):
+        ax.plot([0, 1], [0, 1], 'k--', lw=0.7)
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.set_aspect('equal')
+    axA.set_xlabel('chance (random axis in the same subspace)')
+    axA.set_ylabel('observed cosine (source task axis)')
+    n_dn = int(((pooled['cos_q_random'] <= FDR_ALPHA) & (pooled['cos_z_random'] < 0)).sum())
+    axA.set_title(f'Source task axis in the comm. subspace\n{n_up} above / {n_dn} below chance of {len(pooled)} qualified pairs',
+                  loc='left')
+    session_legend(axA, sessions, loc='lower right')
+    axB.set_xlabel('chance (random axis in the predicted directions)')
+    axB.set_ylabel('observed cosine (target task axis)')
+    n_up_t = int(((pooled_t['cos_tgt_q_random'] <= FDR_ALPHA) & (pooled_t['cos_tgt_z_random'] > 0)).sum())
+    n_dn_t = int(((pooled_t['cos_tgt_q_random'] <= FDR_ALPHA) & (pooled_t['cos_tgt_z_random'] < 0)).sum())
+    axB.set_title(f'Target task axis in the predicted directions\n{n_up_t} above / {n_dn_t} below chance of {len(pooled_t)} qualified',
+                  loc='left')
+    pair_legend(axB, loc='lower right')
+    fig.suptitle(f'Supplementary Figure 2 (pooled). Observed vs. chance cosine over {len(results)} sessions', fontsize=9,
+                 x=0.09, ha='left', y=0.975)
+    place_letters(fig, [axA, axB], 'AB')
+    save(fig, out_dir / 'supp_figure2_pooled.svg')
     return pooled_all
 
 
 def pooled_figures(results, out_dir: Path):
     figure1_pooled(results, out_dir)
+    supp_figure1_pooled(results, out_dir)
     return figure2_pooled(results, out_dir)
 
 
@@ -757,6 +774,7 @@ def main(argv):
         results.append(res)
         out = results_dir / sid / 'figures'
         figure1(res, out)
+        supp_figure1(res, out)
         figure2(res, out)
         print(f'{sid}: figures written to {out}')
     if len(results) > 1:

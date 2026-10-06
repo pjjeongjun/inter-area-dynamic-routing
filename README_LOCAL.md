@@ -91,8 +91,17 @@ export them in `code/run`):
 
     SESSION_IDS          comma-separated session ids (default: every session found)
     NOTEBOOKS            comma-separated notebook filenames (default: the all-pairs notebook)
-    NUISANCE_REGRESSORS  default prev_stim,prev_response,prev_reward; `none` to skip
+    NUISANCE_REGRESSORS  default prev_stim,prev_response,prev_reward,running_speed,pupil_area;
+                         `none` to skip (pupil is skipped automatically in sessions without eye tracking)
+    POST_STEPS           post-processing scripts run after the analysis for the report figures
+                         (default patch_cv_quality.py,patch_lobo_r2.py,alignment_controls.py,r2_dim_null.py;
+                         `none` to skip). They roughly double the per-session time.
     NB_TIMEOUT           per-cell timeout in seconds, -1 for no limit (default -1)
+
+A session that has fewer than two areas with 30 QC-pass single units is reported as
+FAILED (RuntimeError in the analysis cell) and skipped by the pooled figures; the others
+still run. The capsule's default resource class (2xsmall) is slow for 12 sessions; pick a
+larger CPU class in the capsule's Environment panel before pressing Reproducible Run.
 
 You can rehearse it locally too:
 

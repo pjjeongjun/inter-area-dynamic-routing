@@ -11,10 +11,12 @@ Pipeline (see ``analyse_session`` for the exact order):
 1. Stimulus trials only (catch trials dropped). Per-trial, per-unit firing rate over
    the quiescent window before stimulus onset, z-scored per unit over trials.
    Nuisance regression (``NUISANCE_REGRESSORS``, default previous-trial stimulus
-   identity, response and reward): each unit's z-scored rate is regressed (OLS, with
-   intercept) on the previous trial's stimulus (one-hot), whether the animal responded
-   and whether it was rewarded; the residual is re-z-scored. Trials with no previous
-   trial are dropped. Set ``NUISANCE_REGRESSORS=none`` to skip. No condition mean is
+   identity, response and reward plus running speed and pupil area): each unit's
+   z-scored rate is regressed (OLS, with intercept) on the previous trial's stimulus
+   (one-hot), whether the animal responded and whether it was rewarded, and on the
+   z-scored mean running speed and pupil area in the quiescent window (missing pupil
+   values filled with the session mean); the residual is re-z-scored. Trials with no
+   previous trial are dropped. Set ``NUISANCE_REGRESSORS=none`` to skip. No condition mean is
    subtracted: the residual still carries the across-context mean difference.
 2. Qualified cells: QC-pass single units (``is_qc_pass`` and ``decoder_label == 'sua'``).
    Areas with at least ``MIN_UNITS`` of them are included and every area is
@@ -60,7 +62,7 @@ from sklearn.model_selection import KFold, LeaveOneGroupOut
 
 # ----------------------------------------------------------------------------- settings
 MIN_UNITS = 30
-NUISANCE_REGRESSORS = os.environ.get('NUISANCE_REGRESSORS', 'prev_stim,prev_response,prev_reward')
+NUISANCE_REGRESSORS = os.environ.get('NUISANCE_REGRESSORS', 'prev_stim,prev_response,prev_reward,running_speed,pupil_area')
 N_SUBSAMPLES = 10
 ALPHA_GRID = np.logspace(-1, 4, 25)
 N_FOLDS = 10
@@ -111,7 +113,42 @@ def quiescent_rates(trials: pd.DataFrame, units: pd.DataFrame):
     return reg, pd.DataFrame(rates, columns=units.index, index=reg.index)
 
 
-def nuisance_design(trials: pd.DataFrame, reg: pd.DataFrame, regressors):
+def window_means(ts, data, starts, stops, good=None):
+    """Mean of a sampled signal within each [start, stop) window (NaN if no sample)."""
+    ts = np.asarray(ts)
+    data = np.asarray(data, dtype=float)
+    ok = np.isfinite(ts) & np.isfinite(data)
+    if good is not None:
+        ok &= np.asarray(good, dtype=bool)
+    ts, data = ts[ok], data[ok]
+    order = np.argsort(ts)
+    ts, data = ts[order], data[order]
+    csum = np.concatenate([[0.0], np.cumsum(data)])
+    i0, i1 = np.searchsorted(ts, starts), np.searchsorted(ts, stops)
+    n = i1 - i0
+    with np.errstate(invalid='ignore', divide='ignore'):
+        out = (csum[i1] - csum[i0]) / n
+    out[n == 0] = np.nan
+    return out
+
+
+def behaviour_variables(session, reg: pd.DataFrame):
+    """Per-trial quiescent-window means of running speed and pupil area (and trial index)."""
+    beh = session.processing['behavior']
+    t0, t1 = reg['quiescent_start_time'].values, reg['quiescent_stop_time'].values
+    out = {'trial_index': reg['trial_index'].values.astype(float)}
+    run = beh['running_speed']
+    out['running_speed'] = window_means(run.timestamps[:], run.data[:], t0, t1)
+    if 'eye_tracking' in beh.data_interfaces:           # some sessions have no usable eye tracking
+        eye = beh['eye_tracking']
+        out['pupil_area'] = window_means(eye['timestamps'][:], eye['pupil_area'][:], t0, t1,
+                                         good=~np.asarray(eye['pupil_is_bad_frame'][:], dtype=bool))
+    else:
+        out['pupil_area'] = np.full(len(reg), np.nan)
+    return pd.DataFrame(out, index=reg.index)
+
+
+def nuisance_design(trials: pd.DataFrame, reg: pd.DataFrame, regressors, behaviour: pd.DataFrame | None = None):
     """Design matrix (one row per reg trial) of previous-trial covariates, and a mask of
     reg trials that have a previous trial. Previous trial = the trial with
     trial_index - 1 in the full trial table (catch and instruction trials included)."""
@@ -128,6 +165,14 @@ def nuisance_design(trials: pd.DataFrame, reg: pd.DataFrame, regressors):
         cols['prev_response'] = prev['is_response'].values.astype(float)
     if 'prev_reward' in regressors:
         cols['prev_reward'] = prev['is_rewarded'].values.astype(float)
+    for v in ('running_speed', 'pupil_area', 'trial_index'):
+        if v in regressors:
+            x = behaviour[v].values.astype(float)
+            if np.isfinite(x).sum() < 2 or np.nanstd(x) == 0:          # signal absent in this session: skip it
+                print(f'nuisance regressor {v} unavailable in this session; skipped')
+                continue
+            x = np.where(np.isfinite(x), x, np.nanmean(x))          # fill missing with the session mean
+            cols[v] = (x - x.mean()) / x.std()
     X = pd.DataFrame(cols, index=reg.index)
     return X, has_prev
 
@@ -153,6 +198,15 @@ def lda_axis(X, labels):
     lda = LinearDiscriminantAnalysis(solver='svd').fit(X, labels)
     w = lda.coef_.ravel()
     return w / np.linalg.norm(w), lda.score(X, labels)
+
+
+def axis_r2(X, w, labels):
+    """In-sample R² of the task axis: fraction of the variance of the projection X @ w
+    that is explained by the context label (between-context / total variance)."""
+    proj = X @ w
+    total = np.sum((proj - proj.mean()) ** 2)
+    within = sum(np.sum((proj[labels == c] - proj[labels == c].mean()) ** 2) for c in np.unique(labels))
+    return 1 - within / total
 
 
 def lda_lobo_accuracy(X, labels, blocks):
@@ -209,6 +263,15 @@ def dimensionality_1sem(r2_rank):
     return int(np.argmax(mean >= mean[best] - sem)) + 1
 
 
+def insample_rank_r2(X, Y, alpha, d):
+    """In-sample R² (pooled over target units) of the rank-d reduced-rank ridge fit on all trials."""
+    B = ridge_coef(X, Y, alpha)
+    F = X @ B
+    _, _, Vt = np.linalg.svd(F, full_matrices=False)
+    pred = F @ Vt[:d].T @ Vt[:d]
+    return 1 - np.sum((Y - pred) ** 2) / np.sum(Y ** 2)
+
+
 def comm_subspace(X, Y, alpha, d):
     """Orthonormal source-side (n_src x d) and target-side (n_tgt x d) bases of the
     rank-d communication subspace fit on all trials."""
@@ -253,19 +316,29 @@ def p_one_sided(null, observed):
 
 
 # ----------------------------------------------------------------------------- main analysis
-def analyse_session(trials, units, session_id, min_units=MIN_UNITS, n_subsamples=N_SUBSAMPLES, verbose=True):
-    t_start = time.time()
-    log = print if verbose else (lambda *a, **k: None)
-
+def preprocess(session, trials, units, log=print):
+    """Stimulus trials, quiescent-window rates, nuisance regression. Returns
+    (reg_trials, rate_matrix [z-scored residuals], regressor names, per-unit nuisance R^2 or None)."""
     reg, fr = quiescent_rates(trials, units)
     regressors = [r for r in NUISANCE_REGRESSORS.split(',') if r and r != 'none']
     nuisance_r2_unit = None
     if regressors:
-        X_nuis, has_prev = nuisance_design(trials, reg, regressors)
+        behaviour = behaviour_variables(session, reg) if session is not None else None
+        X_nuis, has_prev = nuisance_design(trials, reg, regressors, behaviour)
         reg, fr, X_nuis = reg[has_prev].reset_index(drop=True), fr[has_prev].reset_index(drop=True), X_nuis[has_prev]
         resid, nuisance_r2_unit = residualize(zscore(fr.values), X_nuis.values)
         fr = pd.DataFrame(zscore(resid), columns=fr.columns, index=fr.index)
-        log(f'nuisance regression: {list(X_nuis.columns)}; {int((~has_prev).sum())} trial(s) without a previous trial dropped')
+        n_missing = int(behaviour.loc[has_prev, 'pupil_area'].isna().sum()) if behaviour is not None else 0
+        log(f'nuisance regression: {list(X_nuis.columns)}; {int((~has_prev).sum())} trial(s) without a previous trial '
+            f'dropped; {n_missing} trial(s) with missing pupil filled with the mean')
+    return reg, fr, regressors, nuisance_r2_unit
+
+
+def analyse_session(trials, units, session_id, min_units=MIN_UNITS, n_subsamples=N_SUBSAMPLES, verbose=True, session=None):
+    t_start = time.time()
+    log = print if verbose else (lambda *a, **k: None)
+
+    reg, fr, regressors, nuisance_r2_unit = preprocess(session, trials, units, log)
     context = reg['rewarded_modality'].values
     blocks = reg['block_index'].values
     log(f'{session_id}: {len(reg)} stimulus trials, {len(np.unique(blocks))} blocks, '
@@ -294,6 +367,7 @@ def analyse_session(trials, units, session_id, min_units=MIN_UNITS, n_subsamples
     # containers: per subsample
     K = n_subsamples
     acc_train = np.empty((K, len(areas)))
+    task_r2 = np.empty((K, len(areas)))
     acc_cv = np.empty((K, len(areas)))
     acc_null = np.empty((K, len(areas), N_ACC_PERMUTATIONS))
     axes_ = np.empty((K, len(areas), n))
@@ -302,6 +376,8 @@ def analyse_session(trials, units, session_id, min_units=MIN_UNITS, n_subsamples
     r2_curve = np.empty((K, n_pairs, n))                   # mean over folds
     r2_curve_sem = np.empty((K, n_pairs, n))
     r2_full = np.empty((K, n_pairs))
+    r2_train_dim = np.empty((K, n_pairs))
+    r2_cv_dim = np.empty((K, n_pairs))
     r2_null = np.empty((K, n_pairs, N_R2_PERMUTATIONS))
     dims = np.empty((K, n_pairs), dtype=int)
     cos_src = np.empty((K, n_pairs))
@@ -318,6 +394,7 @@ def analyse_session(trials, units, session_id, min_units=MIN_UNITS, n_subsamples
         lda_rng = npr.default_rng(1000 + k)
         for i, a in enumerate(areas):
             axes_[k, i], acc_train[k, i] = lda_axis(act[a], context)
+            task_r2[k, i] = axis_r2(act[a], axes_[k, i], context)
             acc_cv[k, i] = lda_lobo_accuracy(act[a], context, blocks)
             for j in range(N_ACC_PERMUTATIONS):
                 acc_null[k, i, j] = lda_lobo_accuracy(act[a], lda_rng.permutation(context), blocks)
@@ -337,6 +414,8 @@ def analyse_session(trials, units, session_id, min_units=MIN_UNITS, n_subsamples
             r2_curve_sem[k, p] = r2_rank.std(axis=0, ddof=1) / np.sqrt(N_FOLDS)
             r2_full[k, p] = cv_full_r2(X, Y, alpha[k, p], folds)
             dims[k, p] = dimensionality_1sem(r2_rank)
+            r2_cv_dim[k, p] = r2_rank[:, dims[k, p] - 1].mean()
+            r2_train_dim[k, p] = insample_rank_r2(X, Y, alpha[k, p], dims[k, p])
             Q_src, Q_tgt = comm_subspace(X, Y, alpha[k, p], dims[k, p])
             Q_src_all[k][p] = Q_src
             for j in range(N_R2_PERMUTATIONS):
@@ -364,6 +443,7 @@ def analyse_session(trials, units, session_id, min_units=MIN_UNITS, n_subsamples
             'nuisance_r2': float(np.nanmean(nuisance_r2_unit[unit_pos])) if nuisance_r2_unit is not None else 0.0,
             'session': session_id, 'area': a, 'group': area_group(a), 'n_units_available': int(counts[a]),
             'acc_train': acc_train[:, i].mean(), 'acc_cv': acc_cv[:, i].mean(), 'acc_cv_sd': acc_cv[:, i].std(ddof=1),
+            'task_r2': task_r2[:, i].mean(), 'task_r2_sd': task_r2[:, i].std(ddof=1),
             'acc_null_mean': acc_null_m[i].mean(), 'acc_null_p': p_one_sided(acc_null_m[i], acc_cv[:, i].mean()),
             'acc_null_q975': np.quantile(acc_null_m[i], 0.975),
         })
@@ -376,6 +456,8 @@ def analyse_session(trials, units, session_id, min_units=MIN_UNITS, n_subsamples
             'session': session_id, 'source': s, 'target': t, 'pair_type': pair_type(s, t),
             'alpha': np.median(alpha[:, p]),
             'r2': obs_r2, 'r2_sd': r2_full[:, p].std(ddof=1),
+            'r2_train_dim': r2_train_dim[:, p].mean(), 'r2_train_dim_sd': r2_train_dim[:, p].std(ddof=1),
+            'r2_cv_dim': r2_cv_dim[:, p].mean(), 'r2_cv_dim_sd': r2_cv_dim[:, p].std(ddof=1),
             'r2_null_mean': r2_null_m[p].mean(), 'r2_p': p_one_sided(r2_null_m[p], obs_r2),
             'dim': dims[:, p].mean(), 'dim_sd': dims[:, p].std(ddof=1),
             'cos': obs_src, 'cos_sd': cos_src[:, p].std(ddof=1),
@@ -402,7 +484,8 @@ def analyse_session(trials, units, session_id, min_units=MIN_UNITS, n_subsamples
         'context': context, 'blocks': blocks, 'trial_index': reg['trial_index'].values,
         'unit_counts': {a: int(counts[a]) for a in areas},
         'area_table': area_table, 'pair_table': pair_table,
-        'acc_cv': acc_cv, 'acc_train': acc_train, 'acc_null_mean': acc_null_m,
+        'acc_cv': acc_cv, 'acc_train': acc_train, 'acc_null_mean': acc_null_m, 'task_r2': task_r2,
+        'r2_train_dim': r2_train_dim, 'r2_cv_dim': r2_cv_dim,
         'axes': axes_, 'proj_example': proj_example,
         'r2_curve': r2_curve, 'r2_curve_sem': r2_curve_sem, 'r2_full': r2_full, 'dims': dims,
         'cos_src': cos_src, 'cos_tgt': cos_tgt,
@@ -419,8 +502,9 @@ def main():
     session_id = os.environ.get('SESSION_ID', '743199_2024-12-05')
     results = Path(os.environ.get('RESULTS_DIR', code_dir.parent / 'results')) / session_id
     results.mkdir(parents=True, exist_ok=True)
-    trials, units = load_session(root, session_id)
-    out = analyse_session(trials, units, session_id)
+    import pynwb
+    session = pynwb.read_nwb(find_nwb(root, session_id))
+    out = analyse_session(session.trials[:], session.units[:], session_id, session=session)
     with open(results / 'alignment_results.pkl', 'wb') as f:
         pickle.dump(out, f)
     out['area_table'].to_csv(results / 'task_axis_by_area.csv', index=False)
