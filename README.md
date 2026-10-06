@@ -13,14 +13,18 @@ Per session, quiescent-window firing rates of QC-pass single units are z-scored 
 previous-trial stimulus / response / reward, running speed and pupil area are regressed
 out (`NUISANCE_REGRESSORS`; no condition-mean subtraction). Areas with at least 30 such
 units are kept and every area is subsampled to exactly 30 units, 10 times. For each area
-an LDA context axis is fit with leave-one-block-out decoding accuracy; for each ordered
-pair a reduced-rank-regression communication subspace is fit with 10-fold CV R² vs. rank
-and the 1-SEM dimensionality rule. Alignment is the norm of the unit context axis
-projected onto the subspace, compared with a dimensionality-matched random-axis null and
-FDR-corrected over pairs. Post-processing adds held-out-block R², context decoding from
-the subspace, the cross-block control (axis on three blocks, subspace on the other three)
-and a trial-shuffle null for the rank-d R². Full details are in the module docstring of
-`code/task_axis_comm_subspace.py`.
+an LDA context axis is fit with balanced block-wise cross-validated decoding accuracy (one
+block of each context held out, equal priors), judged against a block-permutation null (labels
+permuted across whole blocks); for each ordered pair a
+reduced-rank-regression communication subspace is fit with 10-fold CV R² vs. rank and
+the 1-SEM dimensionality rule. Alignment is the norm of the unit context axis projected
+onto the subspace, tested against a shuffled-label axis null (an LDA axis fit on shuffled
+labels, projected onto the same subspace) and FDR-corrected over pairs; the
+dimensionality-matched random-axis chance is reported as a reference. Every null draw is
+generated once per session and applied to all unit subsamples. Post-processing adds
+held-out-block R², context decoding from the subspace, the cross-block control (axis on
+three blocks, subspace on the other three) and a trial-shuffle null for the rank-d R².
+Full details are in the module docstring of `code/task_axis_comm_subspace.py`.
 
 ## Layout
 

@@ -5,7 +5,8 @@ rebuilding the same preprocessing and unit subsamples as the stored run:
                      centred) and predicts the held-out block's target activity; R² = 1 − SSE/SST pooled over the six
                      folds and over target units, SST about the training mean.
   r2_lobo_null_mean  per pair: the same after permuting target trials relative to source trials (N_ACC_PERMUTATIONS
-                     draws), averaged over subsamples draw by draw.
+                     draws). The permutations are generated once per session and applied to every subsample; the
+                     null is averaged over subsamples draw by draw.
 
     RESULTS_DIR=../results_regress_full python patch_lobo_r2.py [session ...]
 """
@@ -46,6 +47,7 @@ def patch(session_dir: Path, root: Path):
     sua = units[units['is_qc_pass'] & (units['decoder_label'] == 'sua')]
     folds = list(LeaveOneGroupOut().split(np.arange(len(reg)), groups=blocks))
     P = len(pairs)
+    trial_perms = m.trial_permutations(len(reg), m.N_ACC_PERMUTATIONS, seed=5000)   # shared by every subsample
     r2 = np.empty((K, P))
     null = np.empty((K, P, m.N_ACC_PERMUTATIONS))
     for k in range(K):
@@ -53,15 +55,14 @@ def patch(session_dir: Path, root: Path):
         rng = npr.default_rng(k)
         sub = {a: rng.choice(sua[sua['structure'] == a].index.values, size=m.MIN_UNITS, replace=False) for a in areas}
         act = {a: m.zscore(fr[sub[a]].values) for a in areas}
-        chk = m.lda_lobo_accuracy(act[areas[0]], context, blocks)
+        chk = m.lda_cv_accuracy(act[areas[0]], context, m.context_block_folds(context, blocks))
         assert abs(chk - res['acc_cv'][k, 0]) < 1e-9, (k, chk, res['acc_cv'][k, 0])
-        perm_rng = npr.default_rng(5000 + k)
         for p, (s, t) in enumerate(pairs):
             X, Y = act[s], act[t]
             alpha, d = m.select_alpha(X, Y), int(res['dims'][k, p])
             r2[k, p] = lobo_rank_r2(X, Y, alpha, d, folds)
             for j in range(m.N_ACC_PERMUTATIONS):
-                null[k, p, j] = lobo_rank_r2(X, Y[perm_rng.permutation(len(Y))], alpha, d, folds)
+                null[k, p, j] = lobo_rank_r2(X, Y[trial_perms[j]], alpha, d, folds)
         print(f'{sid}: subsample {k + 1}/{K} in {time.time() - tk:.0f} s', flush=True)
     null_m = null.mean(axis=0)
     res['r2_lobo_dim'], res['r2_lobo_null_mean'] = r2, null_m

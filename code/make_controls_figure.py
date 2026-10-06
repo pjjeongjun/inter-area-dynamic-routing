@@ -44,8 +44,8 @@ def figure_controls(results, out_dir: Path):
     axC = fig.add_subplot(gs[0, 2])
 
     # A: same-blocks vs cross-blocks vs chance, one line per qualified pair
-    cols = ['cos_task', 'cos_same', 'cos_cross', 'cos_cross_chance']
-    xlab = ['all\ntrials', 'same\n3 blocks', 'other\n3 blocks', 'chance']
+    cols = ['cos_task', 'cos_same', 'cos_cross', 'cos_cross_null']
+    xlab = ['all\ntrials', 'same\n3 blocks', 'other\n3 blocks', 'null\n(shuffled labels)']
     rng = np.random.default_rng(0)
     for k, t in enumerate(tables):
         for _, r in t.iterrows():
@@ -62,33 +62,33 @@ def figure_controls(results, out_dir: Path):
     axA.set_ylabel('cosine (task axis, comm. subspace)')
     n_up = int(((pooled['cos_cross_q'] <= FDR_ALPHA) & (pooled['cos_cross_z'] > 0)).sum())
     axA.set_title(f'Cross-block control, {len(pooled)} qualified pairs\n'
-                  f'axis fit on other blocks: {n_up}/{len(pooled)} above chance (q < {FDR_ALPHA})', loc='left')
+                  f'axis fit on other blocks: {n_up}/{len(pooled)} above the shuffled-label null (q < {FDR_ALPHA})', loc='left')
     axA.set_xlabel('blocks used for the task axis relative to the subspace')
     session_legend(axA, sessions, loc='lower left')
 
-    # B: cross-block excess vs same-block excess
+    # B: cross-block excess vs same-block excess, both relative to the shuffled-label axis null of the half-B subspace
     for k, t in enumerate(tables):
         for typ in PAIR_TYPES:
             sub = t[t['pair_type'] == typ]
-            axB.scatter(sub['cos_same'] - sub['cos_cross_chance'], sub['cos_cross'] - sub['cos_cross_chance'], s=18,
+            axB.scatter(sub['cos_same'] - sub['cos_cross_null'], sub['cos_cross'] - sub['cos_cross_null'], s=18,
                         marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[typ], edgecolor='k', linewidth=0.3)
-    lim = max(0.7, (pooled['cos_same'] - pooled['cos_cross_chance']).max() + 0.05)
+    lim = max(0.7, (pooled['cos_same'] - pooled['cos_cross_null']).max() + 0.05)
     axB.plot([0, lim], [0, lim], 'k--', lw=0.7)
     axB.axhline(0, color='k', ls=':', lw=0.7)
     axB.set_xlim(-0.05, lim)
-    axB.set_ylim(min(-0.1, (pooled['cos_cross'] - pooled['cos_cross_chance']).min() - 0.03), lim)
+    axB.set_ylim(min(-0.1, (pooled['cos_cross'] - pooled['cos_cross_null']).min() - 0.03), lim)
     axB.set_aspect('equal')
-    axB.set_xlabel('same-blocks cosine − chance')
-    axB.set_ylabel('cross-blocks cosine − chance')
-    frac = ((pooled['cos_cross'] - pooled['cos_cross_chance']) / (pooled['cos_same'] - pooled['cos_cross_chance'])).median()
-    axB.set_title(f'Fraction that generalises across blocks\nmedian (cross \u2212 chance) / (same \u2212 chance) = {frac:.2f}', loc='left')
+    axB.set_xlabel('same-blocks cosine − null')
+    axB.set_ylabel('cross-blocks cosine − null')
+    frac = ((pooled['cos_cross'] - pooled['cos_cross_null']) / (pooled['cos_same'] - pooled['cos_cross_null'])).median()
+    axB.set_title(f'Fraction that generalises across blocks\nmedian (cross \u2212 null) / (same \u2212 null) = {frac:.2f}', loc='left')
     h = [Line2D([], [], marker='o', color=PAIR_COLOR[t], ls='', ms=5, label=PAIR_LABEL[t]) for t in PAIR_TYPES]
     axB.legend(handles=h, loc='upper left', frameon=False, title='source → target')
 
     # C: cross-block z by pair type
-    strip_by_type_sessions(axC, tables, 'cos_cross_z', 'cross-block cosine: z vs. random-axis null', zero_line=0,
+    strip_by_type_sessions(axC, tables, 'cos_cross_z', 'cross-block cosine: z vs. shuffled-label axis null', zero_line=0,
                            show_n=False)
-    axC.set_title('Cross-block alignment by pair type\nz vs. random-axis null', loc='left')
+    axC.set_title('Cross-block alignment by pair type\nz vs. shuffled-label axis null', loc='left')
 
     fig.suptitle(f'Cross-block control (pooled over {len(results)} sessions, {n_splits} splits; regressed out: '
                  f'{", ".join(results[0]["regressors"])})', fontsize=9, x=0.07, ha='left', y=0.97)

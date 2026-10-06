@@ -26,8 +26,19 @@ Pipeline (see ``analyse_session`` for the exact order):
    barely enough are compared on equal footing.
 3. Task axis: one LDA axis per area (context = rewarded modality, visual vs auditory
    block), unit-normalised in the area's z-scored unit space. Its predictive accuracy
-   is leave-one-block-out cross-validated decoding accuracy, compared with a
-   label-shuffle null.
+   is balanced block-wise cross-validated decoding accuracy: one block of each context
+   is held out (9 folds for 3 + 3 blocks), an LDA with equal class priors is trained
+   on the remaining 2 + 2 blocks and tested on the two held-out blocks (since
+   2026-10-06; before, leave-one-block-out with training-proportion priors, whose
+   3-vs-2 imbalance biased accuracy below 50%). Two nulls: (a) the trial-shuffle null
+   (labels permuted across trials, ``N_ACC_PERMUTATIONS`` draws), which ignores the
+   block structure of the labels, and (b) the block-permutation null (labels permuted
+   across whole blocks, keeping three blocks per context; every assignment except the
+   observed one and its mirror image, 18 draws for 6 blocks; folds re-derived from the
+   permuted labels), which keeps the temporal structure of the labels and therefore
+   captures what slow block-constant signals can achieve without any context signal.
+   An axis is called predictive when its accuracy exceeds every block-permutation draw
+   (``acc_predictive``, p = 1/19); the trial-shuffle null is reported for reference.
 4. Communication subspace: for every ordered pair (source -> target), ridge regression
    (alpha by efficient leave-one-out ``RidgeCV``) followed by reduced-rank regression
    (SVD of the fitted prediction). Predictive performance is the pooled 10-fold
@@ -38,15 +49,28 @@ Pipeline (see ``analyse_session`` for the exact order):
    Significance of the full-rank R^2 comes from a trial-shuffle null.
 5. Alignment: cosine similarity = norm of the source area's unit task axis projected
    onto the pair's source-side communication subspace (1 = axis lies in the
-   subspace, 0 = orthogonal). Chance is the random-axis null: a uniformly random unit
-   vector in the same ``MIN_UNITS``-dimensional space projected onto the same
-   subspace, which only depends on the subspace dimensionality. This is the only null
-   used for alignment. Nulls are drawn per subsample and averaged across subsamples
-   draw-wise, so they are nulls for the subsample-averaged statistic that the figures
-   show.
+   subspace, 0 = orthogonal). The significance null is the shuffled-label axis null:
+   an LDA axis fit exactly like the task axis but on trial-shuffled context labels
+   (``N_AXIS_PERMUTATIONS`` draws), projected onto the same subspace. It keeps the
+   geometry of the estimator (an LDA axis is Σ⁻¹Δμ, so it favours low-variance
+   directions whatever the labels) and asks whether the context axis in particular
+   lies in the subspace. Two references are reported alongside: the random-axis
+   chance (a uniformly random unit vector in the same ``MIN_UNITS``-dimensional
+   space, expected squared cosine d/n; single-draw distribution, pooled over
+   subsamples) and the block-permuted axis (LDA axis on block-permuted labels, 18
+   draws), which shows how well any block-constant signal aligns.
+6. Null draws and subsamples. Every statistic is averaged over the ``N_SUBSAMPLES``
+   unit subsamples, which share the same trials and therefore the same trial noise.
+   Each null draw (one label permutation, one trial permutation) is generated once
+   per session and applied to every subsample, and the null is then averaged across
+   subsamples draw-wise, so the null has the same across-subsample dependence as the
+   observed statistic. (Until 2026-10-06 each subsample drew its own permutations,
+   which shrank every null's spread by about √10.) The random-axis chance is not
+   tied to the data and is pooled across subsamples instead of averaged.
 """
 from __future__ import annotations
 
+import itertools
 import os
 import pickle
 import sys
@@ -68,6 +92,7 @@ ALPHA_GRID = np.logspace(-1, 4, 25)
 N_FOLDS = 10
 N_R2_PERMUTATIONS = 1000
 N_ACC_PERMUTATIONS = 200
+N_AXIS_PERMUTATIONS = 1000
 N_RANDOM_AXES = 1000
 FDR_ALPHA = 0.05
 
@@ -209,12 +234,93 @@ def axis_r2(X, w, labels):
     return 1 - within / total
 
 
-def lda_lobo_accuracy(X, labels, blocks):
-    correct = 0
-    for tr, te in LeaveOneGroupOut().split(X, labels, blocks):
-        lda = LinearDiscriminantAnalysis(solver='svd').fit(X[tr], labels[tr])
+def context_block_folds(labels, blocks):
+    """Balanced block-wise cross-validation folds for block-constant labels: hold out one block of each
+    context (9 folds for 3 + 3 blocks) and train on the remaining 2 + 2 blocks. Every held-out block is a
+    block the decoder has never seen, and training and test sets are balanced across contexts, so the
+    chance level is 50%. Returns [(train_idx, test_idx), ...]."""
+    ids = np.unique(blocks)
+    per = {b: labels[blocks == b][0] for b in ids}
+    classes = sorted(set(per.values()))
+    if len(classes) != 2:
+        raise ValueError(f'expected two context labels, got {classes}')
+    folds = []
+    for b1 in ids:
+        if per[b1] != classes[0]:
+            continue
+        for b2 in ids:
+            if per[b2] != classes[1]:
+                continue
+            te = (blocks == b1) | (blocks == b2)
+            folds.append((np.flatnonzero(~te), np.flatnonzero(te)))
+    return folds
+
+
+def lda_cv_accuracy(X, labels, folds):
+    """Context decoding accuracy of an LDA with equal class priors over the given folds, pooled over
+    held-out trials (equal priors: the decision boundary does not depend on the class proportions of the
+    training set)."""
+    correct = total = 0
+    for tr, te in folds:
+        lda = LinearDiscriminantAnalysis(solver='svd', priors=[0.5, 0.5]).fit(X[tr], labels[tr])
         correct += (lda.predict(X[te]) == labels[te]).sum()
-    return correct / len(labels)
+        total += len(te)
+    return correct / total
+
+
+def lda_axes(X, label_set):
+    """Unit LDA axis for every label vector in ``label_set`` (draws x units)."""
+    return np.stack([lda_axis(X, lab)[0] for lab in label_set])
+
+
+# ----------------------------------------------------------------------------- null draws
+def label_permutations(labels, n, seed):
+    """``n`` trial-wise permutations of the label vector (n x trials). Drawn once per session so that
+    every unit subsample sees the same permutation on the same draw."""
+    rng = npr.default_rng(seed)
+    return np.stack([rng.permutation(labels) for _ in range(n)])
+
+
+def trial_permutations(n_trials, n, seed):
+    """``n`` permutations of the trial index (n x trials), shared by every unit subsample."""
+    rng = npr.default_rng(seed)
+    return np.stack([rng.permutation(n_trials) for _ in range(n)])
+
+
+def block_label_permutations(labels, blocks):
+    """Every assignment of the two context labels to whole blocks that keeps the number of blocks per
+    context, except the observed assignment and its mirror image (which carries the same information).
+    Labels stay constant within a block, so these permutations keep the temporal structure of the real
+    labels (18 draws for 6 blocks, 3 per context). Returns (draws x trials)."""
+    ids = np.unique(blocks)
+    real = np.array([labels[blocks == b][0] for b in ids])
+    classes = np.unique(real)
+    if len(classes) != 2:
+        raise ValueError(f'expected two context labels, got {classes}')
+    n_first = int((real == classes[0]).sum())
+    out = []
+    for chosen in itertools.combinations(range(len(ids)), n_first):
+        assign = np.where(np.isin(np.arange(len(ids)), chosen), classes[0], classes[1])
+        if (assign == real).all() or (assign != real).all():
+            continue
+        lab = labels.copy()
+        for b, a in zip(ids, assign):
+            lab[blocks == b] = a
+        out.append(lab)
+    return np.stack(out)
+
+
+def null_summary(null_m, observed, prefix, one_sided=False, extreme=False):
+    """Summary columns of a null (draws x 1 array, already averaged over subsamples draw-wise) for one
+    observed value: mean, sd, 2.5/97.5 percentiles (or min/max when ``extreme``), z and p."""
+    out = {f'{prefix}_mean': null_m.mean(), f'{prefix}_sd': null_m.std(ddof=1)}
+    if extreme:
+        out[f'{prefix}_lo'], out[f'{prefix}_hi'] = null_m.min(), null_m.max()
+    else:
+        out[f'{prefix}_lo'], out[f'{prefix}_hi'] = np.quantile(null_m, 0.025), np.quantile(null_m, 0.975)
+    out[f'{prefix}_z'] = (observed - null_m.mean()) / null_m.std(ddof=1)
+    out[f'{prefix}_p'] = p_one_sided(null_m, observed) if one_sided else p_two_sided(null_m, observed)
+    return out
 
 
 # ----------------------------------------------------------------------------- comm subspace
@@ -364,12 +470,24 @@ def analyse_session(trials, units, session_id, min_units=MIN_UNITS, n_subsamples
     folds = list(KFold(N_FOLDS, shuffle=True, random_state=0).split(np.arange(len(reg))))
     n = min_units
 
+    # ---- null draws, generated once and applied to every subsample (see docstring, item 6)
+    label_perms = label_permutations(context, N_ACC_PERMUTATIONS, seed=1000)     # trial-shuffled labels, decoding null
+    axis_perms = label_permutations(context, N_AXIS_PERMUTATIONS, seed=1500)     # trial-shuffled labels, axis null
+    block_perms = block_label_permutations(context, blocks)                      # block-permuted labels
+    trial_perms = trial_permutations(len(reg), N_R2_PERMUTATIONS, seed=3000)     # target trials permuted, R² null
+    n_block = len(block_perms)
+    folds_ctx = context_block_folds(context, blocks)                             # hold out one block per context
+    block_folds = [context_block_folds(lab, blocks) for lab in block_perms]       # same design under permuted labels
+    log(f'null draws: {N_ACC_PERMUTATIONS} trial-shuffled label sets (decoding), {N_AXIS_PERMUTATIONS} (axis), '
+        f'{n_block} block permutations, {N_R2_PERMUTATIONS} trial permutations (R²)')
+
     # containers: per subsample
     K = n_subsamples
     acc_train = np.empty((K, len(areas)))
     task_r2 = np.empty((K, len(areas)))
     acc_cv = np.empty((K, len(areas)))
     acc_null = np.empty((K, len(areas), N_ACC_PERMUTATIONS))
+    acc_block_null = np.empty((K, len(areas), n_block))
     axes_ = np.empty((K, len(areas), n))
     proj_example = {}                                      # (k=0) per-trial projections on the axis per area
     alpha = np.empty((K, n_pairs))
@@ -384,20 +502,29 @@ def analyse_session(trials, units, session_id, min_units=MIN_UNITS, n_subsamples
     cos_tgt = np.empty((K, n_pairs))
     cos_null_random = np.empty((K, n_pairs, N_RANDOM_AXES))
     cos_tgt_null_random = np.empty((K, n_pairs, N_RANDOM_AXES))
+    cos_null_shuf = np.empty((K, n_pairs, N_AXIS_PERMUTATIONS))
+    cos_tgt_null_shuf = np.empty((K, n_pairs, N_AXIS_PERMUTATIONS))
+    cos_null_block = np.empty((K, n_pairs, n_block))
+    cos_tgt_null_block = np.empty((K, n_pairs, n_block))
     Q_src_all = [[None] * n_pairs for _ in range(K)]
 
     for k in range(K):
         tk = time.time()
         act = {a: zscore(fr[subsamples[k][a]].values) for a in areas}
 
-        # ---- task axis per area
-        lda_rng = npr.default_rng(1000 + k)
+        # ---- task axis per area, decoding nulls, null axes
+        shuf_axes = np.empty((len(areas), N_AXIS_PERMUTATIONS, n))
+        block_axes = np.empty((len(areas), n_block, n))
         for i, a in enumerate(areas):
             axes_[k, i], acc_train[k, i] = lda_axis(act[a], context)
             task_r2[k, i] = axis_r2(act[a], axes_[k, i], context)
-            acc_cv[k, i] = lda_lobo_accuracy(act[a], context, blocks)
+            acc_cv[k, i] = lda_cv_accuracy(act[a], context, folds_ctx)
             for j in range(N_ACC_PERMUTATIONS):
-                acc_null[k, i, j] = lda_lobo_accuracy(act[a], lda_rng.permutation(context), blocks)
+                acc_null[k, i, j] = lda_cv_accuracy(act[a], label_perms[j], folds_ctx)
+            for j in range(n_block):
+                acc_block_null[k, i, j] = lda_cv_accuracy(act[a], block_perms[j], block_folds[j])
+            shuf_axes[i] = lda_axes(act[a], axis_perms)
+            block_axes[i] = lda_axes(act[a], block_perms)
             if k == 0:
                 proj_example[a] = act[a] @ axes_[k, i]
         rand_rng = npr.default_rng(2000 + k)
@@ -405,7 +532,6 @@ def analyse_session(trials, units, session_id, min_units=MIN_UNITS, n_subsamples
         random_axes /= np.linalg.norm(random_axes, axis=1, keepdims=True)
 
         # ---- communication subspaces
-        perm_rng = npr.default_rng(3000 + k)
         for p, (s, t) in enumerate(pairs):
             X, Y = act[s], act[t]
             alpha[k, p] = select_alpha(X, Y)
@@ -419,60 +545,85 @@ def analyse_session(trials, units, session_id, min_units=MIN_UNITS, n_subsamples
             Q_src, Q_tgt = comm_subspace(X, Y, alpha[k, p], dims[k, p])
             Q_src_all[k][p] = Q_src
             for j in range(N_R2_PERMUTATIONS):
-                r2_null[k, p, j] = cv_full_r2(X, Y[perm_rng.permutation(len(Y))], alpha[k, p], folds)
-            ws, wt = axes_[k, areas.index(s)], axes_[k, areas.index(t)]
-            cos_src[k, p] = np.linalg.norm(Q_src.T @ ws)
-            cos_tgt[k, p] = np.linalg.norm(Q_tgt.T @ wt)
+                r2_null[k, p, j] = cv_full_r2(X, Y[trial_perms[j]], alpha[k, p], folds)
+            i_s, i_t = areas.index(s), areas.index(t)
+            cos_src[k, p] = np.linalg.norm(Q_src.T @ axes_[k, i_s])
+            cos_tgt[k, p] = np.linalg.norm(Q_tgt.T @ axes_[k, i_t])
             cos_null_random[k, p] = np.linalg.norm(random_axes @ Q_src, axis=1)
             cos_tgt_null_random[k, p] = np.linalg.norm(random_axes @ Q_tgt, axis=1)
+            cos_null_shuf[k, p] = np.linalg.norm(shuf_axes[i_s] @ Q_src, axis=1)
+            cos_tgt_null_shuf[k, p] = np.linalg.norm(shuf_axes[i_t] @ Q_tgt, axis=1)
+            cos_null_block[k, p] = np.linalg.norm(block_axes[i_s] @ Q_src, axis=1)
+            cos_tgt_null_block[k, p] = np.linalg.norm(block_axes[i_t] @ Q_tgt, axis=1)
         log(f'  subsample {k + 1}/{K} done in {time.time() - tk:.0f} s')
 
-    # ---- aggregate over subsamples (nulls averaged draw-wise)
+    # ---- aggregate over subsamples: data-tied nulls averaged draw-wise, the random-axis chance pooled
     def agg(x):
         return x.mean(axis=0)
 
-    acc_null_m = agg(acc_null)
+    def pool(x):
+        return np.transpose(x, (1, 0, 2)).reshape(x.shape[1], -1)
+
+    acc_null_m, acc_block_m = agg(acc_null), agg(acc_block_null)
     r2_null_m = agg(r2_null)
-    cos_rand_m = agg(cos_null_random)
-    cos_tgt_rand_m = agg(cos_tgt_null_random)
+    cos_shuf_m, cos_tgt_shuf_m = agg(cos_null_shuf), agg(cos_tgt_null_shuf)
+    cos_block_m, cos_tgt_block_m = agg(cos_null_block), agg(cos_tgt_null_block)
+    cos_rand, cos_tgt_rand = pool(cos_null_random), pool(cos_tgt_null_random)
 
     area_rows = []
     for i, a in enumerate(areas):
         unit_pos = [fr.columns.get_loc(u) for u in sua[sua['structure'] == a].index]
-        area_rows.append({
+        obs_acc = acc_cv[:, i].mean()
+        row = {
             'nuisance_r2': float(np.nanmean(nuisance_r2_unit[unit_pos])) if nuisance_r2_unit is not None else 0.0,
             'session': session_id, 'area': a, 'group': area_group(a), 'n_units_available': int(counts[a]),
-            'acc_train': acc_train[:, i].mean(), 'acc_cv': acc_cv[:, i].mean(), 'acc_cv_sd': acc_cv[:, i].std(ddof=1),
+            'acc_train': acc_train[:, i].mean(), 'acc_cv': obs_acc, 'acc_cv_sd': acc_cv[:, i].std(ddof=1),
             'task_r2': task_r2[:, i].mean(), 'task_r2_sd': task_r2[:, i].std(ddof=1),
-            'acc_null_mean': acc_null_m[i].mean(), 'acc_null_p': p_one_sided(acc_null_m[i], acc_cv[:, i].mean()),
+            # trial-shuffle null (reference): centred on 50% by construction
+            'acc_null_mean': acc_null_m[i].mean(), 'acc_null_p': p_one_sided(acc_null_m[i], obs_acc),
             'acc_null_q975': np.quantile(acc_null_m[i], 0.975),
-        })
+        }
+        # block-permutation null (qualification): min / max over the 18 draws, one-sided p (floor 1/19)
+        row.update(null_summary(acc_block_m[i], obs_acc, 'acc_block_null', one_sided=True, extreme=True))
+        row['acc_block_p'] = row.pop('acc_block_null_p')
+        row['acc_predictive'] = bool(obs_acc > row['acc_block_null_hi'])
+        area_rows.append(row)
     area_table = pd.DataFrame(area_rows)
 
     pair_rows = []
     for p, (s, t) in enumerate(pairs):
         obs_src, obs_tgt, obs_r2 = cos_src[:, p].mean(), cos_tgt[:, p].mean(), r2_full[:, p].mean()
-        pair_rows.append({
+        row = {
             'session': session_id, 'source': s, 'target': t, 'pair_type': pair_type(s, t),
             'alpha': np.median(alpha[:, p]),
             'r2': obs_r2, 'r2_sd': r2_full[:, p].std(ddof=1),
             'r2_train_dim': r2_train_dim[:, p].mean(), 'r2_train_dim_sd': r2_train_dim[:, p].std(ddof=1),
             'r2_cv_dim': r2_cv_dim[:, p].mean(), 'r2_cv_dim_sd': r2_cv_dim[:, p].std(ddof=1),
-            'r2_null_mean': r2_null_m[p].mean(), 'r2_p': p_one_sided(r2_null_m[p], obs_r2),
+            'r2_null_mean': r2_null_m[p].mean(), 'r2_null_q975': np.quantile(r2_null_m[p], 0.975),
+            'r2_p': p_one_sided(r2_null_m[p], obs_r2),
             'dim': dims[:, p].mean(), 'dim_sd': dims[:, p].std(ddof=1),
             'cos': obs_src, 'cos_sd': cos_src[:, p].std(ddof=1),
-            'cos_chance': cos_rand_m[p].mean(),
-            'cos_chance_lo': np.quantile(cos_rand_m[p], 0.025), 'cos_chance_hi': np.quantile(cos_rand_m[p], 0.975),
-            'cos_z_random': (obs_src - cos_rand_m[p].mean()) / cos_rand_m[p].std(ddof=1),
-            'cos_p_random': p_two_sided(cos_rand_m[p], obs_src),
             'cos_tgt': obs_tgt, 'cos_tgt_sd': cos_tgt[:, p].std(ddof=1),
-            'cos_tgt_chance': cos_tgt_rand_m[p].mean(),
-            'cos_tgt_z_random': (obs_tgt - cos_tgt_rand_m[p].mean()) / cos_tgt_rand_m[p].std(ddof=1),
-            'cos_tgt_p_random': p_two_sided(cos_tgt_rand_m[p], obs_tgt),
-        })
+            # random-axis chance (reference; single-draw distribution)
+            'cos_chance': cos_rand[p].mean(),
+            'cos_chance_lo': np.quantile(cos_rand[p], 0.025), 'cos_chance_hi': np.quantile(cos_rand[p], 0.975),
+            'cos_z_random': (obs_src - cos_rand[p].mean()) / cos_rand[p].std(ddof=1),
+            'cos_p_random': p_two_sided(cos_rand[p], obs_src),
+            'cos_tgt_chance': cos_tgt_rand[p].mean(),
+            'cos_tgt_chance_lo': np.quantile(cos_tgt_rand[p], 0.025), 'cos_tgt_chance_hi': np.quantile(cos_tgt_rand[p], 0.975),
+            'cos_tgt_z_random': (obs_tgt - cos_tgt_rand[p].mean()) / cos_tgt_rand[p].std(ddof=1),
+            'cos_tgt_p_random': p_two_sided(cos_tgt_rand[p], obs_tgt),
+        }
+        # shuffled-label axis null (significance), two-sided
+        row.update(null_summary(cos_shuf_m[p], obs_src, 'cos_shuf'))
+        row.update(null_summary(cos_tgt_shuf_m[p], obs_tgt, 'cos_tgt_shuf'))
+        # block-permuted axis (reference): how well any block-constant signal aligns
+        row.update(null_summary(cos_block_m[p], obs_src, 'cos_block', one_sided=True, extreme=True))
+        row.update(null_summary(cos_tgt_block_m[p], obs_tgt, 'cos_tgt_block', one_sided=True, extreme=True))
+        pair_rows.append(row)
     pair_table = pd.DataFrame(pair_rows)
-    for col in ['r2_p', 'cos_p_random', 'cos_tgt_p_random']:
-        pair_table[col.replace('_p', '_q')] = fdr_bh(pair_table[col].values)
+    for col, qcol in [('r2_p', 'r2_q'), ('cos_shuf_p', 'cos_shuf_q'), ('cos_tgt_shuf_p', 'cos_tgt_shuf_q')]:
+        pair_table[qcol] = fdr_bh(pair_table[col].values)
     pair_table['angle_deg'] = np.degrees(np.arccos(np.clip(pair_table['cos'], 0, 1)))
     pair_table['angle_chance_deg'] = np.degrees(np.arccos(np.clip(pair_table['cos_chance'], 0, 1)))
 
@@ -480,16 +631,17 @@ def analyse_session(trials, units, session_id, min_units=MIN_UNITS, n_subsamples
     return {
         'session_id': session_id, 'areas': areas, 'pairs': pairs, 'min_units': min_units,
         'n_subsamples': n_subsamples, 'n_trials': len(reg), 'n_blocks': int(len(np.unique(blocks))),
-        'nuisance_regressors': regressors,
+        'n_block_permutations': n_block, 'nuisance_regressors': regressors,
         'context': context, 'blocks': blocks, 'trial_index': reg['trial_index'].values,
         'unit_counts': {a: int(counts[a]) for a in areas},
         'area_table': area_table, 'pair_table': pair_table,
-        'acc_cv': acc_cv, 'acc_train': acc_train, 'acc_null_mean': acc_null_m, 'task_r2': task_r2,
+        'acc_cv': acc_cv, 'acc_train': acc_train, 'acc_null_mean': acc_null_m, 'acc_block_null_mean': acc_block_m,
+        'task_r2': task_r2,
         'r2_train_dim': r2_train_dim, 'r2_cv_dim': r2_cv_dim,
         'axes': axes_, 'proj_example': proj_example,
         'r2_curve': r2_curve, 'r2_curve_sem': r2_curve_sem, 'r2_full': r2_full, 'dims': dims,
         'cos_src': cos_src, 'cos_tgt': cos_tgt,
-        'cos_null_random_mean': cos_rand_m,
+        'cos_null_random': cos_rand, 'cos_null_shuf_mean': cos_shuf_m, 'cos_null_block_mean': cos_block_m,
         'Q_src_subsample0': Q_src_all[0],
     }
 

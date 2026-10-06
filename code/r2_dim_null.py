@@ -9,8 +9,9 @@ subsample and ordered pair it rebuilds the same activity (same preprocessing, sa
 subsample, same folds), keeps that pair's ridge penalty and d fixed, permutes the
 target trials relative to the source trials ``N_R2_PERMUTATIONS`` times and recomputes
 the 10-fold CV R² at rank d (mean over folds, as in ``r2_curve``). As in the main
-pipeline, the null is averaged over subsamples draw-wise, the p-value is one-sided and
-FDR (Benjamini-Hochberg) runs over the ordered pairs of the session.
+pipeline, the permutations are generated once per session and applied to every subsample,
+the null is averaged over subsamples draw-wise, the p-value is one-sided and FDR
+(Benjamini-Hochberg) runs over the ordered pairs of the session.
 
 The preprocessing must match the run that produced ``alignment_results.pkl``; it is
 read from the pickle (``nuisance_regressors``; absent = none). The script checks that
@@ -94,19 +95,18 @@ def main(argv):
 
         dims = res["dims"]
         n_perm = T.N_R2_PERMUTATIONS
+        perms = T.trial_permutations(len(reg), n_perm, seed=5000)      # one set of permutations for every subsample
         obs = np.empty((K, len(pairs)))
         null = np.empty((K, len(pairs), n_perm))
         max_err = 0.0
         for k in range(K):
             act = {a: T.zscore(fr[subsamples[k][a]].values) for a in areas}
-            perm_rng = npr.default_rng(5000 + k)
             for p, (s, t) in enumerate(pairs):
                 X, Y = act[s], act[t]
                 a_kp = T.select_alpha(X, Y)
                 d = int(dims[k, p])
                 obs[k, p] = rank_d_cv_r2_batch(X, Y[None], a_kp, folds, d)[0]
                 max_err = max(max_err, abs(obs[k, p] - res['r2_curve'][k, p, d - 1]))
-                perms = np.stack([perm_rng.permutation(len(Y)) for _ in range(n_perm)])
                 for c in range(0, n_perm, 250):
                     null[k, p, c:c + 250] = rank_d_cv_r2_batch(X, Y[perms[c:c + 250]], a_kp, folds, d)
             print(f'  {sid}: subsample {k + 1}/{K} done ({time.time() - t0:.0f} s)', flush=True)

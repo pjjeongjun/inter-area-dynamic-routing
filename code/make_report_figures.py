@@ -79,27 +79,82 @@ def scatter_types(ax, tables, xcol, ycol, s=14):
 ACC_YLIM = (0.1, 0.9)   # shared by every decoding-accuracy panel
 
 
+def swarm_x(y, center, dy=0.025, dx=0.09, half_width=0.27):
+    """Deterministic beeswarm offsets: points whose y values fall within ``dy`` of one another are spread
+    sideways by ``dx`` around ``center`` (alternating sides), so markers do not overlap."""
+    y = np.asarray(y, dtype=float)
+    order = np.argsort(y)
+    x = np.full(len(y), float(center))
+    placed = []                                   # (y, x) of points already placed
+    for i in order:
+        slot = 0
+        while True:
+            off = (slot + 1) // 2 * dx * (1 if slot % 2 else -1)
+            if all(abs(y[i] - py) >= dy or abs(center + off - px) >= dx * 0.95 for py, px in placed) or abs(off) > half_width:
+                break
+            slot += 1
+        x[i] = center + off
+        placed.append((y[i], x[i]))
+    return x
+
+
+def stars(p):
+    return '*' if p < 0.05 else 'n.s.'
+
+
+def p_text(p):
+    return 'p < 0.001' if p < 0.001 else f'p = {p:.2f}'
+
+
+def group_bars_and_bracket(ax, x_fr, x_ot, mean_fr, mean_ot, p, yb):
+    """Thick coloured bars at the two group means (spanning the groups' x ranges) and a bracket between the groups
+    annotated with the test result."""
+
+    for xs, mval, grp in ((x_fr, mean_fr, 'frontal'), (x_ot, mean_ot, 'other')):
+        ax.plot([min(xs) - 0.35, max(xs) + 0.35], [mval] * 2, color=GROUP_COLOR[grp], lw=2.0, alpha=0.45, zorder=2, solid_capstyle='butt')
+    for xs in (x_fr, x_ot):
+        ax.plot([min(xs), min(xs), max(xs), max(xs)], [yb - 0.02, yb, yb, yb - 0.02], color='k', lw=0.8)
+    c_fr, c_ot = np.mean([min(x_fr), max(x_fr)]), np.mean([min(x_ot), max(x_ot)])
+    ax.plot([c_fr, c_fr, c_ot, c_ot], [yb + 0.01, yb + 0.04, yb + 0.04, yb + 0.01], color='k', lw=0.8)
+    ax.text((c_fr + c_ot) / 2, yb + 0.04, stars(p), ha='center', va='bottom', fontsize=8 if p < 0.05 else 6.5)
+
+
 def acc_area_panel(ax, areas_tab, order):
-    """Context-axis (LDA) leave-one-block-out decoding accuracy per area instance; filled = above the label-shuffle null."""
+    """Context-axis (LDA) decoding accuracy (one held-out block per context, 9 folds) per area instance; filled = above every
+    draw of the block-permutation null (grey bar: that instance's null range, min to max over the 18 block permutations).
+    Instances of the same area (different sessions) are offset sideways. Coloured bars: mean over the frontal and the
+    non-frontal area instances; bracket: Mann–Whitney test across area instances."""
     for i, a in enumerate(order):
-        for _, r in areas_tab[areas_tab['area'] == a].iterrows():
+        rows = areas_tab[areas_tab['area'] == a]
+        offs = (np.arange(len(rows)) - (len(rows) - 1) / 2) * 0.26
+        for (_, r), dx in zip(rows.iterrows(), offs):
             k = SESSIONS.index(r['session'])
-            pred = r['acc_cv'] > r['acc_null_q975']
+            pred = bool(r['acc_predictive'])
             c = GROUP_COLOR[area_group(a)]
-            ax.errorbar(i, r['acc_cv'], yerr=r['acc_cv_sd'], fmt=MARKERS[k % len(MARKERS)], ms=4.2, color=c, mfc=c if pred else 'white',
+            ax.plot([i + dx, i + dx], [r['acc_block_null_lo'], r['acc_block_null_hi']], color='0.8', lw=3.2 if len(rows) > 1 else 4,
+                    solid_capstyle='butt', alpha=0.6, zorder=1)
+            ax.errorbar(i + dx, r['acc_cv'], yerr=r['acc_cv_sd'], fmt=MARKERS[k % len(MARKERS)], ms=4.2, color=c, mfc=c if pred else 'white',
                         mec=c, mew=0.8, elinewidth=0.6, capsize=0, zorder=3)
     ax.set_xticks(range(len(order)))
     ax.set_xticklabels(order, rotation=90)
     for lab, a in zip(ax.get_xticklabels(), order):
         lab.set_color(GROUP_COLOR[area_group(a)])
     ax.set_xlim(-0.7, len(order) - 0.3)
-    null_hi = areas_tab['acc_null_q975'].mean()
-    ax.fill_between([-0.7, len(order) - 0.3], 1 - null_hi, null_hi, color='0.88', lw=0, zorder=0)
     ax.axhline(0.5, color='k', ls='--', lw=0.7)
     ax.set_ylim(0, 1.0)
     ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
     ax.set_xlabel('Area (blue: frontal cortex, orange: others)')
-    ax.set_ylabel('context decoding accuracy\n(held-out block)')
+    ax.set_ylabel('context decoding accuracy\n(held-out blocks)')
+    # group means over area instances and the frontal vs. non-frontal comparison (Mann–Whitney across instances)
+    grp = areas_tab['area'].map(area_group)
+    fr, ot = areas_tab.loc[grp == 'frontal', 'acc_cv'], areas_tab.loc[grp != 'frontal', 'acc_cv']
+    p_fr = stats.mannwhitneyu(fr, ot).pvalue
+    i_fr = [i for i, a in enumerate(order) if area_group(a) == 'frontal']
+    i_ot = [i for i, a in enumerate(order) if area_group(a) != 'frontal']
+    group_bars_and_bracket(ax, i_fr, i_ot, fr.mean(), ot.mean(), p_fr, yb=0.9)
+    ax.set_title(f'Context axis (LDA): context decoding\nfrontal {fr.mean():.0%} vs. others {ot.mean():.0%} over area instances, {p_text(p_fr)}',
+                 loc='left')
+    return p_fr
 
 
 def figure_r1(results, out_dir):
@@ -127,12 +182,11 @@ def figure_r1(results, out_dir):
     subspace_decoding_panel(axB, tables, pooled)
 
     acc_area_panel(axC, areas_tab, area_order(areas_tab['area'].unique()))
-    axC.set_title('Context axis (LDA): context decoding', loc='left')
-    h = [Line2D([], [], marker='o', color='0.4', ls='', ms=4, label='Above chance'),
-         Line2D([], [], marker='o', mfc='white', mec='0.4', ls='', ms=4, label='Not above chance')]
+    h = [Line2D([], [], marker='o', color='0.4', ls='', ms=4, label='Above null'),
+         Line2D([], [], marker='o', mfc='white', mec='0.4', ls='', ms=4, label='Not above null')]
     axC.legend(handles=h, loc='lower left', frameon=False, handletextpad=0.3, labelspacing=0.2, borderaxespad=0.1)
     axC.add_artist(axC.get_legend())
-    session_legend(axC, 'upper right', handletextpad=0.3, labelspacing=0.25, borderaxespad=0.2)
+    session_legend(axC, 'lower right', handletextpad=0.3, labelspacing=0.25, borderaxespad=0.2)
 
     place_letters(fig, [axA, axB, axC], 'ABC', dx=-0.075)
     save(fig, out_dir / 'figure_R1_subspace_and_decoding.svg')
@@ -195,7 +249,8 @@ def alignment_by_area_panel(ax, pooled, area_col, excess, order, frontal_mask):
     i_fr = [i for i, a in enumerate(order) if area_group(a) == 'frontal']
     i_ot = [i for i, a in enumerate(order) if area_group(a) != 'frontal']
     for g, mask, grp in ((i_fr, frontal_mask, 'frontal'), (i_ot, ~frontal_mask, 'other')):
-        ax.plot([min(g) - 0.35, max(g) + 0.35], [excess[mask].mean()] * 2, color=GROUP_COLOR[grp], lw=2.0, zorder=4)
+        ax.plot([min(g) - 0.35, max(g) + 0.35], [excess[mask].mean()] * 2, color=GROUP_COLOR[grp], lw=2.0, alpha=0.45, zorder=2,
+                solid_capstyle='butt')
     yb = 0.64
     for g in (i_fr, i_ot):
         ax.plot([min(g), min(g), max(g), max(g)], [yb - 0.025, yb, yb, yb - 0.025], color='k', lw=0.8)
@@ -212,7 +267,7 @@ def figure_r2(results, out_dir):
     tables = [t[t['qualified']] for t in tables_all]
     pooled = pooled_all[pooled_all['qualified']]
     pooled_t = pooled_all[pooled_all['qualified_tgt']]
-    ylab = 'Alignment\n(cosine − chance)'
+    ylab = 'Alignment\n(cosine − shuffled-label null)'
 
     fig = plt.figure(figsize=(W, 5.9))
     gs = fig.add_gridspec(2, 2, hspace=0.62, wspace=0.32, left=0.1, right=0.985, top=0.93, bottom=0.11)
@@ -226,17 +281,17 @@ def figure_r2(results, out_dir):
     axA.set_ylim(-0.25, 0.8)
     axA.set_ylabel(ylab)
     axA.set_xlabel('Source area')
-    n_up = int(((pooled['cos_q_random'] <= FDR_ALPHA) & (pooled['cos_z_random'] > 0)).sum())
-    axA.set_title(f'Source side: alignment by area\n{n_up}/{len(pooled)} pairs above chance', loc='left')
+    n_up = int(((pooled['cos_shuf_q'] <= FDR_ALPHA) & (pooled['cos_shuf_z'] > 0)).sum())
+    axA.set_title(f'Source side: alignment by area\n{n_up}/{len(pooled)} pairs above the null', loc='left')
 
     # B: target side, by target area; bracket = frontal vs. non-frontal targets
-    ex_t = pooled_t['cos_tgt'] - pooled_t['cos_tgt_chance']
+    ex_t = pooled_t['excess_tgt']
     order_t = area_order(pooled_t['target'].unique())
     alignment_by_area_panel(axB, pooled_t, 'target', ex_t, order_t, pooled_t['pair_type'].str.endswith('frontal'))
     axB.set_ylabel(ylab)
     axB.set_xlabel('Target area')
-    n_up_t = int(((pooled_t['cos_tgt_q_random'] <= FDR_ALPHA) & (pooled_t['cos_tgt_z_random'] > 0)).sum())
-    axB.set_title(f'Target side: alignment by area\n{n_up_t}/{len(pooled_t)} pairs above chance', loc='left')
+    n_up_t = int(((pooled_t['cos_tgt_shuf_q'] <= FDR_ALPHA) & (pooled_t['cos_tgt_shuf_z'] > 0)).sum())
+    axB.set_title(f'Target side: alignment by area\n{n_up_t}/{len(pooled_t)} pairs above the null', loc='left')
 
     # C: source-side excess against the source axis's decoding accuracy, qualified pairs only
     for k, t in enumerate(tables):
@@ -266,64 +321,65 @@ def figure_r2(results, out_dir):
 
 # ----------------------------------------------------------------------------- R1, panel B
 def subspace_decoding_panel(ax, tables, pooled):
-    """Context decoded from the communication subspace (held-out block), by pair type; filled = the pair's decoding accuracy
-    is above its label-shuffle null (97.5th percentile), open = not. Asterisks: each pair type vs. its label-shuffle null; bracket: frontal → vs. other → sources."""
-    rng = np.random.default_rng(0)
+    """Context decoded from the communication subspace (held-out blocks), by pair type; filled = the pair's decoding accuracy
+    is above every draw of its block-permutation null, open = not. Grey box: the pair type's block-permutation null (mean
+    over pairs of the null's min and max). Coloured bars: mean over all pairs with a
+    frontal / non-frontal source; bracket: frontal → vs. other → sources (Mann–Whitney over pairs). Asterisks under the
+    x-axis labels: each pair type vs. its block-permutation null (Wilcoxon on accuracy − null mean)."""
     for i, typ in enumerate(PAIR_TYPES):
-        for k, t in enumerate(tables):
-            sub = t[t['pair_type'] == typ]
-            x = i + rng.uniform(-0.2, 0.2, len(sub))
-            q = (sub['sub_acc_cv'] > sub['sub_acc_null_q975']).values
-            ax.scatter(x[q], sub['sub_acc_cv'].values[q], s=16, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[typ], edgecolor='k',
-                        linewidth=0.3, zorder=3)
-            ax.scatter(x[~q], sub['sub_acc_cv'].values[~q], s=16, marker=MARKERS[k % len(MARKERS)], color='white', edgecolor=PAIR_COLOR[typ],
-                        linewidth=0.7, zorder=3)
-        sub = pooled[pooled['pair_type'] == typ]
-        ax.errorbar(i + 0.34, sub['sub_acc_cv'].mean(), yerr=sub['sub_acc_cv'].std(ddof=1) / np.sqrt(len(sub)), fmt='_',
-                     color='k', ms=9, mew=1.4, elinewidth=1.0, capsize=0, zorder=4)
+        sub_all = pooled[pooled['pair_type'] == typ]
+        ax.fill_between([i - 0.45, i + 0.45], sub_all['sub_acc_block_null_lo'].mean(), sub_all['sub_acc_block_null_hi'].mean(),
+                        color='0.88', lw=0, zorder=0)
+        # one swarm per pair type (all sessions together, so points of different sessions do not overlap either)
+        parts = [(k, t[t['pair_type'] == typ]) for k, t in enumerate(tables)]
+        yall = np.concatenate([sub['sub_acc_cv'].values for _, sub in parts])
+        xall = swarm_x(yall, i, dy=0.022, dx=0.08, half_width=0.42)
+        pos = 0
+        for k, sub in parts:
+            n = len(sub)
+            x, yv, q = xall[pos:pos + n], yall[pos:pos + n], sub['sub_acc_predictive'].values.astype(bool)
+            pos += n
+            ax.scatter(x[q], yv[q], s=14, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[typ], edgecolor='k', linewidth=0.3, zorder=3)
+            ax.scatter(x[~q], yv[~q], s=14, marker=MARKERS[k % len(MARKERS)], color='white', edgecolor=PAIR_COLOR[typ], linewidth=0.7,
+                       zorder=3)
     ax.set_xticks(range(len(PAIR_TYPES)))
     short_type_ticks(ax)
-    ax.set_xlim(-0.6, len(PAIR_TYPES) - 0.3)
-    ax.set_ylabel('context decoding accuracy\n(held-out block)')
-    null_hi = pooled['sub_acc_null_q975'].mean()
-    ax.fill_between([-0.6, len(PAIR_TYPES) - 0.3], 1 - null_hi, null_hi, color='0.88', lw=0, zorder=0)
+    ax.set_xlim(-0.6, len(PAIR_TYPES) - 0.2)
+    ax.set_ylabel('context decoding accuracy\n(held-out blocks)')
     ax.axhline(0.5, color='k', ls='--', lw=0.7)
     ax.set_ylim(0, 1.0)
     ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
     ax.set_xlabel('pair type (source → target)')
-    # asterisks: each pair type vs. its label-shuffle null (two-sided Wilcoxon signed-rank on accuracy − null mean);
-    # bracket: frontal → vs. other → sources (Mann–Whitney), all pairs
-    def stars(p):
-        return '*' if p < 0.05 else 'n.s.'
+    # each pair type vs. its block-permutation null: mark next to the tick label
+    labels = []
     for i, typ in enumerate(PAIR_TYPES):
         sub = pooled[pooled['pair_type'] == typ]
-        p_typ = stats.wilcoxon(sub['sub_acc_cv'] - sub['sub_acc_null_mean']).pvalue
-        ax.text(i, sub['sub_acc_cv'].max() + 0.015, stars(p_typ), ha='center', va='bottom',
-                 fontsize=8 if p_typ < 0.05 else 6.5)
+        p_typ = stats.wilcoxon(sub['sub_acc_cv'] - sub['sub_acc_block_null_mean']).pvalue
+        labels.append(f'{SHORT[typ]}\n{"*" if p_typ < 0.05 else "n.s."}')
+    ax.set_xticklabels(labels)
+    # group means and the frontal → vs. other → comparison over pairs
     fr = pooled['pair_type'].str.startswith('frontal')
     p_fr = stats.mannwhitneyu(pooled['sub_acc_cv'][fr], pooled['sub_acc_cv'][~fr]).pvalue
-    yb = 0.87
-    ax.plot([0, 0, 1, 1], [yb - 0.02, yb, yb, yb - 0.02], color='k', lw=0.8)
-    ax.plot([2, 2, 3, 3], [yb - 0.02, yb, yb, yb - 0.02], color='k', lw=0.8)
-    ax.plot([0.5, 0.5, 2.5, 2.5], [yb + 0.01, yb + 0.04, yb + 0.04, yb + 0.01], color='k', lw=0.8)
-    ax.text(1.5, yb + 0.04, stars(p_fr), ha='center', va='bottom', fontsize=8)
-    ax.set_title('Comm. subspace: context decoding', loc='left')
-    h = [Line2D([], [], marker='o', color='0.4', ls='', ms=4, label='Above chance'),
-         Line2D([], [], marker='o', mfc='white', mec='0.4', ls='', ms=4, label='Not above chance')]
+    m_fr, m_ot = pooled['sub_acc_cv'][fr].mean(), pooled['sub_acc_cv'][~fr].mean()
+    group_bars_and_bracket(ax, [0, 1], [2, 3], m_fr, m_ot, p_fr, yb=0.9)
+    ax.set_title(f'Comm. subspace: context decoding\nfrontal→ {m_fr:.0%} vs. others→ {m_ot:.0%}, {p_text(p_fr)}', loc='left')
+    h = [Line2D([], [], marker='o', color='0.4', ls='', ms=4, label='Above null'),
+         Line2D([], [], marker='o', mfc='white', mec='0.4', ls='', ms=4, label='Not above null')]
     ax.legend(handles=h, loc='lower left', frameon=False, handletextpad=0.3, labelspacing=0.2, borderaxespad=0.1)
-
+    return p_fr
 
 
 # ----------------------------------------------------------------------------- R2, panel D
 def cross_block_panel(ax, d=None):
     """Cross-block control, qualified pairs: cosine between the task axis fit on the other three blocks and the
-    communication subspace fit on the remaining three, vs. the random-axis chance of that half-data subspace; lines join
-    the same pair, black bars = means; bracket = paired two-sided Wilcoxon signed-rank test across pairs."""
+    communication subspace fit on the remaining three, vs. the shuffled-label axis null of that half-data subspace (an
+    axis fit on the same three blocks with shuffled labels); lines join the same pair, black bars = means; bracket =
+    paired two-sided Wilcoxon signed-rank test across pairs."""
     base = RESULTS_DIR if d is None else BUNDLE / d
     c = pd.read_csv(base / 'pooled' / 'controls_by_pair_pooled.csv')
     tables = [c[(c['session'] == s) & c['qualified']] for s in SESSIONS]
     pooled = pd.concat(tables, ignore_index=True)
-    cols = ['cos_cross', 'cos_cross_chance']
+    cols = ['cos_cross', 'cos_cross_null']
     rng = np.random.default_rng(0)
     for k, t in enumerate(tables):
         for _, r in t.iterrows():
@@ -332,17 +388,17 @@ def cross_block_panel(ax, d=None):
             ax.plot(np.arange(2) + j, y, color=PAIR_COLOR[r['pair_type']], lw=0.45, alpha=0.5)
             ax.scatter(np.arange(2) + j, y, s=7, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[r['pair_type']], edgecolor='k', linewidth=0.2, zorder=3)
     ax.plot(np.arange(2) + 0.22, [pooled[cc].mean() for cc in cols], 'k_', ms=10, mew=1.5, zorder=4)
-    p = stats.wilcoxon(pooled['cos_cross'], pooled['cos_cross_chance']).pvalue
+    p = stats.wilcoxon(pooled['cos_cross'], pooled['cos_cross_null']).pvalue
     yb = pooled[cols].values.max() + 0.06
     ax.plot([0, 0, 1, 1], [yb - 0.03, yb, yb, yb - 0.03], color='k', lw=0.8)
     ax.text(0.5, yb, '*' if p < 0.05 else 'n.s.', ha='center', va='bottom', fontsize=8 if p < 0.05 else 6.5)
     ax.set_xticks(range(2))
-    ax.set_xticklabels(['axis from\nother blocks', 'chance'])
+    ax.set_xticklabels(['axis from\nother blocks', 'null (shuffled\nlabels, same blocks)'])
     ax.set_xlim(-0.5, 1.5)
     ax.set_ylim(0, 1)
     ax.set_ylabel('Cosine (axis, subspace)')
     n_up = int(((pooled['cos_cross_q'] <= FDR_ALPHA) & (pooled['cos_cross_z'] > 0)).sum())
-    ax.set_title(f'Cross-block control\n{n_up}/{len(pooled)} pairs above chance', loc='left')
+    ax.set_title(f'Cross-block control\n{n_up}/{len(pooled)} pairs above the null', loc='left')
     return p
 
 

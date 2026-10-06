@@ -239,15 +239,18 @@ def strip_by_type(ax, table, ycol, ylabel, zero_line=None, y_err=None, show_mean
 
 # ----------------------------------------------------------------------------- figure 1
 def task_axis_panels(axA, axB, at, areas, xlabels, colors, sessions_of=None, sessions=None, null_band=True):
-    """A: task-axis in-sample R² per area; B: leave-one-block-out decoding accuracy per area."""
+    """A: task-axis in-sample R² per area; B: cross-validated (held-out blocks) decoding accuracy per area."""
     x = np.arange(len(areas))
     for ax, col, err, ylab in [(axA, 'task_r2', 'task_r2_sd', 'task-axis R²\n(variance of the projection explained by context)'),
-                               (axB, 'acc_cv', 'acc_cv_sd', 'context decoding accuracy\n(leave-one-block-out)')]:
+                               (axB, 'acc_cv', 'acc_cv_sd', 'context decoding accuracy\n(held-out blocks)')]:
         for i, a in enumerate(areas):
             rows = at[at['area'] == a] if 'area' in at else at.loc[[a]]
             for _, r in rows.iterrows():
-                pred = r['acc_cv'] > r['acc_null_q975']
+                pred = bool(r['acc_predictive'])
                 mk = MARKERS[sessions.index(r['session']) % len(MARKERS)] if sessions is not None else 'o'
+                if ax is axB and null_band:      # this area instance's block-permutation null range
+                    ax.plot([i, i], [r['acc_block_null_lo'], r['acc_block_null_hi']], color='0.8', lw=5, solid_capstyle='butt',
+                            alpha=0.6, zorder=1)
                 ax.errorbar(i, r[col], yerr=r[err], fmt=mk, ms=6, color=colors[i], mfc=colors[i] if pred else 'white',
                             mec=colors[i], mew=1.0, elinewidth=0.8, capsize=0, zorder=3)
         ax.set_xticks(x)
@@ -258,14 +261,11 @@ def task_axis_panels(axA, axB, at, areas, xlabels, colors, sessions_of=None, ses
         ax.set_ylabel(ylab)
         ax.set_xlabel('area')
     axA.set_ylim(0, 1)
-    if null_band:
-        hi = at['acc_null_q975'].mean()
-        axB.fill_between([-0.6, len(areas) - 0.4], 1 - hi, hi, color='0.88', lw=0, zorder=0)
     axB.axhline(0.5, color='k', ls='--', lw=0.7)
-    axB.set_ylim(min(0.2, at['acc_cv'].min() - at['acc_cv_sd'].max() - 0.03), 1.0)
-    n_pred = int((at['acc_cv'] > at['acc_null_q975']).sum())
+    axB.set_ylim(min(0.2, at['acc_cv'].min() - at['acc_cv_sd'].max() - 0.03, at['acc_block_null_lo'].min() - 0.03), 1.0)
+    n_pred = int(at['acc_predictive'].sum())
     axA.set_title('Task axis: in-sample R²\nfilled = predictive in B, open = not', loc='left')
-    axB.set_title(f'Task axis: predictive accuracy\n{n_pred}/{len(at)} above the label-shuffle null (grey band, 95%)',
+    axB.set_title(f'Task axis: predictive accuracy\n{n_pred}/{len(at)} above the block-permutation null (grey: null range)',
                   loc='left')
 
 
@@ -356,23 +356,25 @@ def alignment_marks(q, z):
 
 def qualify(res):
     """Pair table with qualification flags. A pair's source-side alignment is 'qualified'
-    when the source task axis decodes context above the label-shuffle null AND the
+    when the source task axis decodes context above the block-permutation null AND the
     communication-subspace R² beats the trial-shuffle null (FDR); target-side alignment
-    needs the target's axis to be predictive instead. FDR q-values for the alignment
-    tests are recomputed over the qualified pairs only."""
+    needs the target's axis to be predictive instead. 'excess' is the observed cosine
+    minus the mean of the shuffled-label axis null (the significance null); FDR q-values
+    for that null are recomputed over the qualified pairs only."""
     pt = res['pair_table'].copy()
     at = res['area_table'].set_index('area')
-    pred = {a: bool(at.loc[a, 'acc_cv'] > at.loc[a, 'acc_null_q975']) for a in res['areas']}
+    pred = {a: bool(at.loc[a, 'acc_predictive']) for a in res['areas']}
     pt['source_acc_cv'] = at.loc[pt['source'], 'acc_cv'].values
-    pt['source_acc_null_q975'] = at.loc[pt['source'], 'acc_null_q975'].values
+    pt['source_acc_block_null_hi'] = at.loc[pt['source'], 'acc_block_null_hi'].values
     pt['source_axis_predictive'] = pt['source'].map(pred)
     pt['target_axis_predictive'] = pt['target'].map(pred)
     pt['r2_significant'] = pt['r2_q'] <= FDR_ALPHA
     pt['qualified'] = pt['source_axis_predictive'] & pt['r2_significant']
     pt['qualified_tgt'] = pt['target_axis_predictive'] & pt['r2_significant']
-    pt['excess'] = pt['cos'] - pt['cos_chance']
-    for pcol, qcol, mask in [('cos_p_random', 'cos_q_random', 'qualified'),
-                             ('cos_tgt_p_random', 'cos_tgt_q_random', 'qualified_tgt')]:
+    pt['excess'] = pt['cos'] - pt['cos_shuf_mean']
+    pt['excess_tgt'] = pt['cos_tgt'] - pt['cos_tgt_shuf_mean']
+    for pcol, qcol, mask in [('cos_shuf_p', 'cos_shuf_q', 'qualified'),
+                             ('cos_tgt_shuf_p', 'cos_tgt_shuf_q', 'qualified_tgt')]:
         pt[qcol] = np.nan
         m = pt[mask].values
         if m.any():
@@ -398,16 +400,16 @@ def figure2(res, out_dir: Path):
     axF = fig.add_subplot(gs[1, 2])
 
     at = res['area_table'].set_index('area')
-    not_pred = [a for a in areas if at.loc[a, 'acc_cv'] <= at.loc[a, 'acc_null_q975']]
+    not_pred = [a for a in areas if not at.loc[a, 'acc_predictive']]
 
     def flag_sources(ax):
         ax.set_yticklabels([f'{a} \u2020' if a in not_pred else a for a in areas])
         for lab, a in zip(ax.get_yticklabels(), areas):
             lab.set_color(GROUP_COLOR[area_group(a)])
 
-    # A: cosine heatmap, random-axis null marks
+    # A: cosine heatmap, shuffled-label axis null marks
     m_cos = matrix(pt, areas, 'cos')
-    marks = alignment_marks(matrix(pt, areas, 'cos_q_random').values, matrix(pt, areas, 'cos_z_random').values)
+    marks = alignment_marks(matrix(pt, areas, 'cos_shuf_q').values, matrix(pt, areas, 'cos_shuf_z').values)
     heatmap(axA, m_cos, 'viridis', 0, 1, cbar_label='cosine similarity', marks=marks)
     n_up = int(np.sum(marks == '*'))
     n_dn = int(np.sum(marks == '−'))
@@ -417,29 +419,29 @@ def figure2(res, out_dir: Path):
     if not_pred:
         axA.set_ylabel('source area (\u2020 task axis not predictive)')
 
-    # B: observed vs chance
+    # B: observed vs the shuffled-label axis null
     for t in PAIR_TYPES:
         sub = pt[pt['pair_type'] == t]
-        sig = sub['cos_q_random'] <= FDR_ALPHA
+        sig = sub['cos_shuf_q'] <= FDR_ALPHA
         for flag, mfc in [(True, PAIR_COLOR[t]), (False, 'white')]:
             s2 = sub[sig == flag]
             if s2.empty:
                 continue
-            axB.errorbar(s2['cos_chance'], s2['cos'], yerr=s2['cos_sd'],
-                         xerr=np.vstack([s2['cos_chance'] - s2['cos_chance_lo'], s2['cos_chance_hi'] - s2['cos_chance']]),
+            axB.errorbar(s2['cos_shuf_mean'], s2['cos'], yerr=s2['cos_sd'],
+                         xerr=np.vstack([s2['cos_shuf_mean'] - s2['cos_shuf_lo'], s2['cos_shuf_hi'] - s2['cos_shuf_mean']]),
                          fmt='o', ms=4.5, color=PAIR_COLOR[t], mfc=mfc, mec=PAIR_COLOR[t], elinewidth=0.6, capsize=0)
     axB.plot([0, 1], [0, 1], 'k--', lw=0.7)
     axB.set_xlim(0, 1)
     axB.set_ylim(0, 1)
     axB.set_aspect('equal')
-    axB.set_xlabel('chance: random axis in same subspace\n(mean, 95% range)')
+    axB.set_xlabel('null: LDA axis on shuffled labels, same subspace\n(mean, 95% range)')
     axB.set_ylabel('observed cosine (mean ± SD over subsamples)')
-    axB.set_title('Every pair vs. its chance level\nchance = random axis, same dimensionality', loc='left')
+    axB.set_title('Every pair vs. its null\nnull = shuffled-label axis, same subspace', loc='left')
     pair_legend(axB, loc='lower right')
     axB.text(0.03, 0.97, 'open = not significant', transform=axB.transAxes, va='top', fontsize=7)
 
-    # C: z-score vs random-axis null by pair type
-    strip_by_type(axC, pt, 'cos_z_random', 'z-score vs. random-axis null', zero_line=0)
+    # C: z-score vs the shuffled-label axis null by pair type
+    strip_by_type(axC, pt, 'cos_shuf_z', 'z-score vs. shuffled-label axis null', zero_line=0)
     axC.set_title('By pair type\nz-score of the subsample-averaged cosine', loc='left')
     axC.text(0.02, 0.1, 'black = mean ± SEM over pairs', transform=axC.transAxes, va='bottom', fontsize=7)
 
@@ -464,7 +466,7 @@ def figure2(res, out_dir: Path):
     axD.set_xticklabels(areas, rotation=45 if len(areas) > 6 else 0, ha='right' if len(areas) > 6 else 'center')
     for lab, a in zip(axD.get_xticklabels(), areas):
         lab.set_color(GROUP_COLOR[area_group(a)])
-    axD.set_ylabel('observed − chance cosine')
+    axD.set_ylabel('observed − null cosine\n(null = shuffled-label axis)')
     axD.set_xlabel('area')
     axD.set_title('By area\nas source (●, its task axis) and as target (■)', loc='left')
     h = [Line2D([], [], marker='o', color='0.4', ls='', ms=5, label='as source (open: excluded)'),
@@ -477,7 +479,7 @@ def figure2(res, out_dir: Path):
 
     # F: target-side alignment
     m_ct = matrix(pt_t, areas, 'cos_tgt')
-    marks = alignment_marks(matrix(pt_t, areas, 'cos_tgt_q_random').values, matrix(pt_t, areas, 'cos_tgt_z_random').values)
+    marks = alignment_marks(matrix(pt_t, areas, 'cos_tgt_shuf_q').values, matrix(pt_t, areas, 'cos_tgt_shuf_z').values)
     heatmap(axF, m_ct, 'viridis', 0, 1, cbar_label='cosine similarity', marks=marks)
     n_up = int(np.sum(marks == '*'))
     n_dn = int(np.sum(marks == '−'))
@@ -655,13 +657,13 @@ def figure2_pooled(results, out_dir: Path):
     tables_t = [t[t['qualified_tgt']] for t in tables_all]
     pooled_t = pooled_all[pooled_all['qualified_tgt']]
     from scipy import stats
-    ylab = 'cosine(task axis, comm. subspace) − chance'
+    ylab = 'cosine(task axis, comm. subspace) − null\n(null = shuffled-label axis)'
 
     fig = plt.figure(figsize=(11, 7.4))
     gs = fig.add_gridspec(2, 2, width_ratios=[1, 1], hspace=0.5, wspace=0.3, left=0.07, right=0.98, top=0.89, bottom=0.09)
     axC = fig.add_subplot(gs[0, :])
     axB = fig.add_subplot(gs[1, 0])
-    n_up = int(((pooled['cos_q_random'] <= FDR_ALPHA) & (pooled['cos_z_random'] > 0)).sum())
+    n_up = int(((pooled['cos_shuf_q'] <= FDR_ALPHA) & (pooled['cos_shuf_z'] > 0)).sum())
 
     # B: the same excess vs source-axis accuracy, qualified pairs only
     for k, t in enumerate(tables):
@@ -674,7 +676,7 @@ def figure2_pooled(results, out_dir: Path):
     fit = stats.linregress(pooled['source_acc_cv'], pooled['excess'])
     xfit = np.array([pooled['source_acc_cv'].min(), pooled['source_acc_cv'].max()])
     axB.plot(xfit, fit.intercept + fit.slope * xfit, color='k', lw=1.2, zorder=4)
-    axB.set_xlabel('source task axis: leave-one-block-out decoding accuracy')
+    axB.set_xlabel('source task axis: decoding accuracy (held-out blocks)')
     axB.set_ylabel(ylab)
     axB.set_ylim(-0.3, max(0.7, pooled['excess'].max() + 0.05))
     axB.set_title(f'Alignment vs. context decoding of the source area\nSpearman ρ = {rho:.2f}, p = {pval:.2f}; line = least squares',
@@ -682,7 +684,6 @@ def figure2_pooled(results, out_dir: Path):
     group_legend(axB, loc='lower right', ncol=2)
 
     # C: the same excess by area, as source and as target
-    pooled_all = pooled_all.assign(excess_tgt=pooled_all['cos_tgt'] - pooled_all['cos_tgt_chance'])
     order = area_order(set(pooled['source']) | set(pooled_t['target']))
     rng = np.random.default_rng(0)
     for i, a in enumerate(order):
@@ -713,45 +714,45 @@ def figure2_pooled(results, out_dir: Path):
     axC.legend(handles=h, loc='lower left', frameon=False, ncol=3, columnspacing=1.2, handletextpad=0.4)
 
     fig.suptitle(f'Figure 2 (pooled). Alignment over {len(results)} sessions: {len(pooled)} of {len(pooled_all)} ordered '
-                 f'pairs qualify (source task axis predictive, R² significant); chance = random axis',
+                 f'pairs qualify (source task axis predictive, R² significant); null = shuffled-label axis',
                  fontsize=9, x=0.07, ha='left', y=0.98)
     place_letters(fig, [axC, axB], 'AB')
     save(fig, out_dir / 'figure2_pooled.svg')
 
-    # Supplementary Figure 2: observed vs chance, source and target side
+    # Supplementary Figure 2: observed vs the shuffled-label axis null, source and target side
     fig = plt.figure(figsize=(9, 4.2))
     gs = fig.add_gridspec(1, 2, wspace=0.4, left=0.09, right=0.97, top=0.82, bottom=0.15)
     axA, axB = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])
     for k, t in enumerate(tables):
         for typ in PAIR_TYPES:
             sub = t[t['pair_type'] == typ]
-            axA.scatter(sub['cos_chance'], sub['cos'], s=18, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[typ],
+            axA.scatter(sub['cos_shuf_mean'], sub['cos'], s=18, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[typ],
                         edgecolor='k', linewidth=0.3)
     for k, t in enumerate(tables_t):
         for typ in PAIR_TYPES:
             sub = t[t['pair_type'] == typ]
-            axB.scatter(sub['cos_tgt_chance'], sub['cos_tgt'], s=18, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[typ],
+            axB.scatter(sub['cos_tgt_shuf_mean'], sub['cos_tgt'], s=18, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[typ],
                         edgecolor='k', linewidth=0.3)
     for ax in (axA, axB):
         ax.plot([0, 1], [0, 1], 'k--', lw=0.7)
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         ax.set_aspect('equal')
-    axA.set_xlabel('chance (random axis in the same subspace)')
+    axA.set_xlabel('null mean (shuffled-label axis in the same subspace)')
     axA.set_ylabel('observed cosine (source task axis)')
-    n_dn = int(((pooled['cos_q_random'] <= FDR_ALPHA) & (pooled['cos_z_random'] < 0)).sum())
-    axA.set_title(f'Source task axis in the comm. subspace\n{n_up} above / {n_dn} below chance of {len(pooled)} qualified pairs',
+    n_dn = int(((pooled['cos_shuf_q'] <= FDR_ALPHA) & (pooled['cos_shuf_z'] < 0)).sum())
+    axA.set_title(f'Source task axis in the comm. subspace\n{n_up} above / {n_dn} below the null of {len(pooled)} qualified pairs',
                   loc='left')
     session_legend(axA, sessions, loc='lower right')
-    axB.set_xlabel('chance (random axis in the predicted directions)')
+    axB.set_xlabel('null mean (shuffled-label axis in the predicted directions)')
     axB.set_ylabel('observed cosine (target task axis)')
-    n_up_t = int(((pooled_t['cos_tgt_q_random'] <= FDR_ALPHA) & (pooled_t['cos_tgt_z_random'] > 0)).sum())
-    n_dn_t = int(((pooled_t['cos_tgt_q_random'] <= FDR_ALPHA) & (pooled_t['cos_tgt_z_random'] < 0)).sum())
-    axB.set_title(f'Target task axis in the predicted directions\n{n_up_t} above / {n_dn_t} below chance of {len(pooled_t)} qualified',
+    n_up_t = int(((pooled_t['cos_tgt_shuf_q'] <= FDR_ALPHA) & (pooled_t['cos_tgt_shuf_z'] > 0)).sum())
+    n_dn_t = int(((pooled_t['cos_tgt_shuf_q'] <= FDR_ALPHA) & (pooled_t['cos_tgt_shuf_z'] < 0)).sum())
+    axB.set_title(f'Target task axis in the predicted directions\n{n_up_t} above / {n_dn_t} below the null of {len(pooled_t)} qualified',
                   loc='left')
     pair_legend(axB, loc='lower right')
-    fig.suptitle(f'Supplementary Figure 2 (pooled). Observed vs. chance cosine over {len(results)} sessions', fontsize=9,
-                 x=0.09, ha='left', y=0.975)
+    fig.suptitle(f'Supplementary Figure 2 (pooled). Observed cosine vs. the shuffled-label axis null over {len(results)} sessions',
+                 fontsize=9, x=0.09, ha='left', y=0.975)
     place_letters(fig, [axA, axB], 'AB')
     save(fig, out_dir / 'supp_figure2_pooled.svg')
     return pooled_all
