@@ -281,7 +281,7 @@ def figure_r2(results, out_dir):
     ylab = 'Alignment\n(cosine − shuffled-label null)'
 
     fig = plt.figure(figsize=(W, 5.9))
-    gs = fig.add_gridspec(2, 3, width_ratios=[1, 1, 0.3], hspace=0.62, wspace=0.32, left=0.1, right=0.985, top=0.93, bottom=0.11)
+    gs = fig.add_gridspec(2, 3, width_ratios=[1, 1, 0.45], hspace=0.62, wspace=0.32, left=0.1, right=0.985, top=0.93, bottom=0.11)
     axA = fig.add_subplot(gs[0, 0])
     axB = fig.add_subplot(gs[0, 1], sharey=axA)
     axC = fig.add_subplot(gs[1, 0], sharey=axA)
