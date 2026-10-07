@@ -163,7 +163,8 @@ def acc_area_panel(ax, areas_tab, order):
     return p_fr
 
 
-def figure_r1(results, out_dir):
+def figure_r1(results, out_dir, color_by='target'):
+    """color_by: 'target' (default) or 'source' -- which area of the pair colours the points in A and B."""
     """Communication subspace: cross-validated R² per pair (A) and context decoded from it per pair (B); context axis
     (LDA): context decoding accuracy per area instance (C)."""
     tables = [qualify(r) for r in results]
@@ -178,7 +179,7 @@ def figure_r1(results, out_dir):
     axL = fig.add_subplot(sub[0, 1])
     axL.axis('off')
 
-    strip(axA, tables, 'r2_cv_dim', 'cross-validated R²\n(rank-d fit, held-out trials)', color_by='target')
+    strip(axA, tables, 'r2_cv_dim', 'cross-validated R²\n(rank-d fit, held-out trials)', color_by=color_by)
     axA.set_ylim(0, pooled['r2_cv_dim'].max() * 1.15)
     axA.axhline(0, color='k', ls='--', lw=0.7)
     axA.set_xlabel('pair type (source → target)')
@@ -188,7 +189,7 @@ def figure_r1(results, out_dir):
     n_sig = int(pooled['r2_significant'].sum())
     axA.set_title(f'Comm. subspace: cross-validated R²\n{n_sig}/{len(pooled)} pairs > trial-shuffle null', loc='left')
 
-    subspace_decoding_panel(axB, tables, pooled)
+    subspace_decoding_panel(axB, tables, pooled, color_by=color_by)
 
     acc_area_panel(axC, areas_tab, area_order(areas_tab['area'].unique()))
     h = [Line2D([], [], marker='o', color='0.4', ls='', ms=4, label='Above null'),
@@ -202,7 +203,7 @@ def figure_r1(results, out_dir):
                    fontsize=5.5)
 
     place_letters(fig, [axA, axB, axC], 'ABC', dx=-0.075)
-    save(fig, out_dir / 'figure_R1_subspace_and_decoding.svg')
+    save(fig, out_dir / ('figure_R1_subspace_and_decoding.svg' if color_by == 'target' else f'figure_R1_subspace_and_decoding_by_{color_by}.svg'))
 
 
 def figure_rs1(results, out_dir):
@@ -243,7 +244,8 @@ def excess_strip(ax, tables, col, chance_col, ylabel):
     return pd.concat(tabs, ignore_index=True)
 
 
-def alignment_by_area_panel(ax, pooled, area_col, excess, order, frontal_mask, yb=0.74):
+def alignment_by_area_panel(ax, pooled, area_col, excess, order, frontal_mask, yb=0.74, color_col=None):
+    color_col = color_col or area_col                    # which area of the pair gives the marker colour
     """Alignment excess (observed − chance cosine) per area, one point per qualified pair; coloured bars = mean over all
     pairs whose plotted area is frontal / not frontal, compared by the bracket (Mann–Whitney)."""
     rng = np.random.default_rng(0)
@@ -253,7 +255,8 @@ def alignment_by_area_panel(ax, pooled, area_col, excess, order, frontal_mask, y
             m_ = sel & (pooled['session'] == sid).values
             if m_.any():
                 ax.scatter(i + rng.uniform(-0.15, 0.15, int(m_.sum())), excess[m_].values, s=12,
-                           marker=MARKERS[SESSIONS.index(sid) % len(MARKERS)], color=area_color(a),
+                           marker=MARKERS[SESSIONS.index(sid) % len(MARKERS)],
+                           c=[area_color(b) for b in pooled.loc[m_, color_col]],
                            edgecolor='k', linewidth=0.3, zorder=3)
     ax.axhline(0, color='k', ls='--', lw=0.7)
     ax.set_xticks(range(len(order)))
@@ -282,7 +285,8 @@ def alignment_by_area_panel(ax, pooled, area_col, excess, order, frontal_mask, y
     return p_fr
 
 
-def figure_r2(results, out_dir):
+def figure_r2(results, out_dir, color_by='target'):
+    """color_by='source' colours panel B (x = target area) by the pair's source area instead of the target itself."""
     tables_all = [qualify(r) for r in results]
     pooled_all = pd.concat(tables_all, ignore_index=True)
     tables = [t[t['qualified']] for t in tables_all]
@@ -316,7 +320,8 @@ def figure_r2(results, out_dir):
     # B: target side, by target area; bracket = frontal vs. non-frontal targets
     ex_t = pooled_t['excess_tgt']
     order_t = area_order(pooled_t['target'].unique())
-    alignment_by_area_panel(axB, pooled_t, 'target', ex_t, order_t, pooled_t['pair_type'].str.endswith('frontal'))
+    alignment_by_area_panel(axB, pooled_t, 'target', ex_t, order_t, pooled_t['pair_type'].str.endswith('frontal'),
+                            color_col='source' if color_by == 'source' else 'target')
     axB.set_ylabel('')                                   # y axis shared with A (label drawn once)
     axB.set_xlabel('Target area')
     n_up_t = int(((pooled_t['cos_tgt_shuf_q'] <= FDR_ALPHA) & (pooled_t['cos_tgt_shuf_z'] > 0)).sum())
@@ -340,11 +345,11 @@ def figure_r2(results, out_dir):
     axC.text(0.03, 0.97, f'ρ = {rho:.2f}, {p_text(pval)}', transform=axC.transAxes, va='top', fontsize=6.5)
 
     place_letters(fig, [axA, axB, axC], 'ABC', dx=-0.075)
-    save(fig, out_dir / 'figure_R2_alignment.svg')
+    save(fig, out_dir / ('figure_R2_alignment.svg' if color_by == 'target' else f'figure_R2_alignment_by_{color_by}.svg'))
 
 
 # ----------------------------------------------------------------------------- R1, panel B
-def subspace_decoding_panel(ax, tables, pooled):
+def subspace_decoding_panel(ax, tables, pooled, color_by='target'):
     """Context decoded from the communication subspace (held-out blocks), by pair type; filled = the pair's decoding accuracy
     is above every draw of its block-permutation null, open = not. Grey box: the pair type's block-permutation null (mean
     over pairs of the null's min and max). Coloured bars: mean over all pairs with a
@@ -363,8 +368,8 @@ def subspace_decoding_panel(ax, tables, pooled):
             n = len(sub)
             x, yv, q = xall[pos:pos + n], yall[pos:pos + n], sub['sub_acc_predictive'].values.astype(bool)
             pos += n
-            ax.scatter(x[q], yv[q], s=14, marker=MARKERS[k % len(MARKERS)], c=[area_color(t_) for t_ in sub['target'].values[q]], edgecolor='k', linewidth=0.3, zorder=3)
-            ax.scatter(x[~q], yv[~q], s=14, marker=MARKERS[k % len(MARKERS)], color='white', edgecolor=[area_color(t_) for t_ in sub['target'].values[~q]], linewidth=1.1,
+            ax.scatter(x[q], yv[q], s=14, marker=MARKERS[k % len(MARKERS)], c=[area_color(t_) for t_ in sub[color_by].values[q]], edgecolor='k', linewidth=0.3, zorder=3)
+            ax.scatter(x[~q], yv[~q], s=14, marker=MARKERS[k % len(MARKERS)], color='white', edgecolor=[area_color(t_) for t_ in sub[color_by].values[~q]], linewidth=1.1,
                        zorder=3)
     ax.set_xticks(range(len(PAIR_TYPES)))
     short_type_ticks(ax)
