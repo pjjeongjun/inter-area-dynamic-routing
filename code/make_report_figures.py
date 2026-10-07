@@ -287,7 +287,7 @@ def figure_r2(results, out_dir):
     axC = fig.add_subplot(gs[1, 0], sharey=axA)
     axL = fig.add_subplot(gs[0, 2])                      # session legend shared by A and B
     axL.axis('off')
-    session_legend(axL, 'center left', handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0, fontsize=5.5)
+    session_legend(axL, 'center right', bbox_to_anchor=(1.0, 0.5), handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0, fontsize=5.5)
 
     # A: source side, by source area; bracket = frontal vs. non-frontal sources
     order = area_order(pooled['source'].unique())
