@@ -238,10 +238,13 @@ def alignment_by_area_panel(ax, pooled, area_col, excess, order, frontal_mask):
     pairs whose plotted area is frontal / not frontal, compared by the bracket (Mann–Whitney)."""
     rng = np.random.default_rng(0)
     for i, a in enumerate(order):
-        vals = excess[pooled[area_col] == a].values
-        if len(vals):
-            ax.scatter(i + rng.uniform(-0.15, 0.15, len(vals)), vals, s=11, color=GROUP_COLOR[area_group(a)], edgecolor='k',
-                       linewidth=0.3, zorder=3)
+        sel = (pooled[area_col] == a).values
+        for sid in SESSIONS:                              # one marker shape per session, as in the other panels
+            m_ = sel & (pooled['session'] == sid).values
+            if m_.any():
+                ax.scatter(i + rng.uniform(-0.15, 0.15, int(m_.sum())), excess[m_].values, s=12,
+                           marker=MARKERS[SESSIONS.index(sid) % len(MARKERS)], color=GROUP_COLOR[area_group(a)],
+                           edgecolor='k', linewidth=0.3, zorder=3)
     ax.axhline(0, color='k', ls='--', lw=0.7)
     ax.set_xticks(range(len(order)))
     ax.set_xticklabels(order, rotation=90)
@@ -278,10 +281,13 @@ def figure_r2(results, out_dir):
     ylab = 'Alignment\n(cosine − shuffled-label null)'
 
     fig = plt.figure(figsize=(W, 5.9))
-    gs = fig.add_gridspec(2, 2, hspace=0.62, wspace=0.32, left=0.1, right=0.985, top=0.93, bottom=0.11)
+    gs = fig.add_gridspec(2, 3, width_ratios=[1, 1, 0.3], hspace=0.62, wspace=0.32, left=0.1, right=0.985, top=0.93, bottom=0.11)
     axA = fig.add_subplot(gs[0, 0])
     axB = fig.add_subplot(gs[0, 1], sharey=axA)
     axC = fig.add_subplot(gs[1, 0], sharey=axA)
+    axL = fig.add_subplot(gs[0, 2])                      # session legend shared by A and B
+    axL.axis('off')
+    session_legend(axL, 'center left', handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0, fontsize=5.5)
 
     # A: source side, by source area; bracket = frontal vs. non-frontal sources
     order = area_order(pooled['source'].unique())
