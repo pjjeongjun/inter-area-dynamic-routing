@@ -29,7 +29,8 @@ from matplotlib.ticker import MultipleLocator, PercentFormatter
 from scipy import stats
 
 import make_alignment_figures as m
-from make_alignment_figures import (FDR_ALPHA, GROUP_COLOR, MARKERS, PAIR_COLOR, PAIR_LABEL, PAIR_TYPES, area_group,
+from make_alignment_figures import (FDR_ALPHA, GROUP_COLOR, MARKERS, PAIR_COLOR, PAIR_LABEL, PAIR_TYPES, REGION_COLOR,
+                                    area_group, area_region, region_legend,
                                     area_order, place_letters, qualify, r2_at_dimensionality, save)
 
 plt.rcParams.update({'font.size': 7, 'axes.titlesize': 7.5, 'axes.labelsize': 7, 'xtick.labelsize': 6.5,
@@ -106,12 +107,15 @@ def p_text(p):
     return 'p < 0.001' if p < 0.001 else (f'p = {p:.3f}' if p < 0.01 else f'p = {p:.2f}')
 
 
+OTHERS_BAR = '0.3'   # mean bar over all non-frontal areas (grey: the non-frontal regions have their own colours)
+
+
 def group_bars_and_bracket(ax, x_fr, x_ot, mean_fr, mean_ot, p, yb):
     """Thick coloured bars at the two group means (spanning the groups' x ranges) and a bracket between the groups
     annotated with the test result."""
 
-    for xs, mval, grp in ((x_fr, mean_fr, 'frontal'), (x_ot, mean_ot, 'other')):
-        ax.plot([min(xs) - 0.35, max(xs) + 0.35], [mval] * 2, color=GROUP_COLOR[grp], lw=2.0, alpha=0.45, zorder=2, solid_capstyle='butt')
+    for xs, mval, col in ((x_fr, mean_fr, GROUP_COLOR['frontal']), (x_ot, mean_ot, OTHERS_BAR)):
+        ax.plot([min(xs) - 0.35, max(xs) + 0.35], [mval] * 2, color=col, lw=2.0, alpha=0.45, zorder=2, solid_capstyle='butt')
     for xs in (x_fr, x_ot):
         ax.plot([min(xs), min(xs), max(xs), max(xs)], [yb - 0.02, yb, yb, yb - 0.02], color='k', lw=0.8)
     c_fr, c_ot = np.mean([min(x_fr), max(x_fr)]), np.mean([min(x_ot), max(x_ot)])
@@ -130,7 +134,7 @@ def acc_area_panel(ax, areas_tab, order):
         for (_, r), dx in zip(rows.iterrows(), offs):
             k = SESSIONS.index(r['session'])
             pred = bool(r['acc_predictive'])
-            c = GROUP_COLOR[area_group(a)]
+            c = REGION_COLOR[area_region(a)]
             ax.plot([i + dx, i + dx], [r['acc_block_null_lo'], r['acc_block_null_hi']], color='0.8', lw=3.2 if len(rows) > 1 else 4,
                     solid_capstyle='butt', alpha=0.6, zorder=1)
             ax.errorbar(i + dx, r['acc_cv'], yerr=r['acc_cv_sd'], fmt=MARKERS[k % len(MARKERS)], ms=4.2, color=c, mfc=c if pred else 'white',
@@ -138,12 +142,12 @@ def acc_area_panel(ax, areas_tab, order):
     ax.set_xticks(range(len(order)))
     ax.set_xticklabels(order, rotation=90)
     for lab, a in zip(ax.get_xticklabels(), order):
-        lab.set_color(GROUP_COLOR[area_group(a)])
+        lab.set_color(REGION_COLOR[area_region(a)])
     ax.set_xlim(-0.7, len(order) - 0.3)
     ax.axhline(0.5, color='k', ls='--', lw=0.7)
     ax.set_ylim(0, 1.0)
     ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
-    ax.set_xlabel('Area (blue: frontal cortex, orange: others)')
+    ax.set_xlabel('Area (colour: region)')
     ax.set_ylabel('context decoding accuracy\n(held-out blocks)')
     # group means over area instances and the frontal vs. non-frontal comparison (Mann–Whitney across instances)
     grp = areas_tab['area'].map(area_group)
@@ -167,7 +171,7 @@ def figure_r1(results, out_dir):
     fig = plt.figure(figsize=(W, 6.0))
     gs = fig.add_gridspec(2, 2, height_ratios=[1, 0.9], hspace=0.62, wspace=0.42, left=0.12, right=0.985, top=0.93, bottom=0.1)
     axA, axB = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])
-    sub = gs[1, :].subgridspec(1, 2, width_ratios=[1, 0.2], wspace=0.04)   # room for the session legend beside C
+    sub = gs[1, :].subgridspec(1, 2, width_ratios=[1, 0.6], wspace=0.04)   # room for the region and session legends beside C
     axC = fig.add_subplot(sub[0, 0])
     axL = fig.add_subplot(sub[0, 1])
     axL.axis('off')
@@ -189,7 +193,10 @@ def figure_r1(results, out_dir):
          Line2D([], [], marker='o', mfc='white', mec='0.4', ls='', ms=4, label='Not above null')]
     axC.legend(handles=h, loc='lower left', frameon=False, handletextpad=0.3, labelspacing=0.2, borderaxespad=0.1)
     axC.add_artist(axC.get_legend())
-    session_legend(axL, 'center left', handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0, fontsize=5.5)
+    region_legend(axL, [area_region(a) for a in areas_tab['area'].unique()], loc='upper left', bbox_to_anchor=(0.0, 1.0),
+                  handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0, fontsize=5.5, title_fontsize=6)
+    session_legend(axL, 'upper right', bbox_to_anchor=(1.0, 1.0), handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0,
+                   fontsize=5.5)
 
     place_letters(fig, [axA, axB, axC], 'ABC', dx=-0.075)
     save(fig, out_dir / 'figure_R1_subspace_and_decoding.svg')
@@ -243,20 +250,20 @@ def alignment_by_area_panel(ax, pooled, area_col, excess, order, frontal_mask):
             m_ = sel & (pooled['session'] == sid).values
             if m_.any():
                 ax.scatter(i + rng.uniform(-0.15, 0.15, int(m_.sum())), excess[m_].values, s=12,
-                           marker=MARKERS[SESSIONS.index(sid) % len(MARKERS)], color=GROUP_COLOR[area_group(a)],
+                           marker=MARKERS[SESSIONS.index(sid) % len(MARKERS)], color=REGION_COLOR[area_region(a)],
                            edgecolor='k', linewidth=0.3, zorder=3)
     ax.axhline(0, color='k', ls='--', lw=0.7)
     ax.set_xticks(range(len(order)))
     ax.set_xticklabels(order, rotation=90)
     for lab, a in zip(ax.get_xticklabels(), order):
-        lab.set_color(GROUP_COLOR[area_group(a)])
+        lab.set_color(REGION_COLOR[area_region(a)])
     ax.set_xlim(-0.6, len(order) - 0.4)
     frontal_mask = np.asarray(frontal_mask, dtype=bool)
     i_fr = [i for i, a in enumerate(order) if area_group(a) == 'frontal']
     i_ot = [i for i, a in enumerate(order) if area_group(a) != 'frontal']
-    for g, mask, grp in ((i_fr, frontal_mask, 'frontal'), (i_ot, ~frontal_mask, 'other')):
+    for g, mask, col in ((i_fr, frontal_mask, GROUP_COLOR['frontal']), (i_ot, ~frontal_mask, OTHERS_BAR)):
         if g and mask.any():        # group mean bar only when the group has pairs
-            ax.plot([min(g) - 0.35, max(g) + 0.35], [excess[mask].mean()] * 2, color=GROUP_COLOR[grp], lw=2.0, alpha=0.45,
+            ax.plot([min(g) - 0.35, max(g) + 0.35], [excess[mask].mean()] * 2, color=col, lw=2.0, alpha=0.45,
                     zorder=2, solid_capstyle='butt')
     # frontal-vs-other comparison needs both groups (one session alone may have only one)
     if not i_fr or not i_ot or frontal_mask.sum() < 2 or (~frontal_mask).sum() < 2:
@@ -287,7 +294,12 @@ def figure_r2(results, out_dir):
     axC = fig.add_subplot(gs[1, 0], sharey=axA)
     axL = fig.add_subplot(gs[0, 2])                      # session legend shared by A and B
     axL.axis('off')
-    session_legend(axL, 'center right', bbox_to_anchor=(1.0, 0.5), handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0, fontsize=5.5)
+    region_legend(axL, [area_region(a) for a in set(pooled['source']) | set(pooled_t['target'])], loc='center right',
+                  bbox_to_anchor=(1.0, 0.5), handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0, fontsize=5.5, title_fontsize=6)
+    axL2 = fig.add_subplot(gs[1, 2])                     # session legend (marker shapes used in every panel)
+    axL2.axis('off')
+    session_legend(axL2, 'center right', bbox_to_anchor=(1.0, 0.5), handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0,
+                   fontsize=5.5)
 
     # A: source side, by source area; bracket = frontal vs. non-frontal sources
     order = area_order(pooled['source'].unique())

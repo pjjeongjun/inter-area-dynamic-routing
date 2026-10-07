@@ -38,6 +38,54 @@ PAIR_COLOR = {'frontal->frontal': '#1f6fb2', 'frontal->other': '#6fb0dd',
               'other->frontal': '#e8a86a', 'other->other': '#d9772b'}
 EXTRA_PNG_DIR = os.environ.get('ALIGN_QC_DIR')  # optional PNG previews outside the results tree
 
+# Finer anatomical grouping of the recorded areas (Allen CCF ontology), used to colour and order the
+# by-area panels. Statistics still compare frontal cortex against everything else.
+REGION_ORDER = ['Frontal cortex', 'Other isocortex', 'Olfactory cortex', 'Hippocampal formation',
+                'Striatum / septum', 'Thalamus', 'Midbrain']
+REGION_OF = {
+    # isocortex outside the frontal set: sensory, motor and association areas
+    'MOp': 'Other isocortex', 'SSp': 'Other isocortex', 'SSs': 'Other isocortex', 'VISp': 'Other isocortex',
+    'VISC': 'Other isocortex', 'AUDp': 'Other isocortex', 'AUDpo': 'Other isocortex', 'AUDv': 'Other isocortex',
+    'AUDd': 'Other isocortex', 'TEa': 'Other isocortex', 'ECT': 'Other isocortex', 'PERI': 'Other isocortex',
+    'RSPd': 'Other isocortex', 'RSPv': 'Other isocortex', 'RSPagl': 'Other isocortex', 'PTLp': 'Other isocortex',
+    'VISa': 'Other isocortex', 'VISam': 'Other isocortex', 'VISrl': 'Other isocortex', 'VISl': 'Other isocortex',
+    # olfactory areas (CCF 'OLF'): piriform, taenia tecta, dorsal peduncular, olfactory tubercle, AON
+    'OLF': 'Olfactory cortex', 'PIR': 'Olfactory cortex', 'TTd': 'Olfactory cortex', 'TTv': 'Olfactory cortex',
+    'DP': 'Olfactory cortex', 'OT': 'Olfactory cortex', 'AON': 'Olfactory cortex', 'NLOT': 'Olfactory cortex',
+    # hippocampal formation (hippocampal and retrohippocampal regions)
+    'CA1': 'Hippocampal formation', 'CA2': 'Hippocampal formation', 'CA3': 'Hippocampal formation',
+    'DG': 'Hippocampal formation', 'ProS': 'Hippocampal formation', 'SUB': 'Hippocampal formation',
+    'POST': 'Hippocampal formation', 'PRE': 'Hippocampal formation', 'ENTl': 'Hippocampal formation',
+    'ENTm': 'Hippocampal formation',
+    # striatum and lateral septal complex
+    'CP': 'Striatum / septum', 'ACB': 'Striatum / septum', 'LSr': 'Striatum / septum', 'LSc': 'Striatum / septum',
+    'LSv': 'Striatum / septum', 'FS': 'Striatum / septum',
+    # thalamus
+    'MGv': 'Thalamus', 'MGd': 'Thalamus', 'MGm': 'Thalamus', 'PoT': 'Thalamus', 'PO': 'Thalamus', 'LP': 'Thalamus',
+    'LGd': 'Thalamus', 'VPM': 'Thalamus', 'VPL': 'Thalamus', 'MD': 'Thalamus', 'VAL': 'Thalamus', 'VM': 'Thalamus',
+    # midbrain
+    'MRN': 'Midbrain', 'RN': 'Midbrain', 'SCm': 'Midbrain', 'SCs': 'Midbrain', 'APN': 'Midbrain', 'PAG': 'Midbrain',
+    'SNr': 'Midbrain', 'SNc': 'Midbrain', 'VTA': 'Midbrain', 'IC': 'Midbrain', 'NOT': 'Midbrain', 'MB': 'Midbrain',
+}
+REGION_COLOR = {'Frontal cortex': '#1f6fb2', 'Other isocortex': '#d9772b', 'Olfactory cortex': '#8c564b',
+                'Hippocampal formation': '#2ca02c', 'Striatum / septum': '#9467bd', 'Thalamus': '#e377c2',
+                'Midbrain': '#17becf', 'Unassigned': '#7f7f7f'}
+
+
+def area_region(area: str) -> str:
+    if area_group(area) == 'frontal':
+        return 'Frontal cortex'
+    return REGION_OF.get(area, 'Unassigned')
+
+
+def region_legend(ax, regions, loc='upper left', **kw):
+    """Square colour swatches for the regions present (in REGION_ORDER)."""
+    present = [r for r in REGION_ORDER + ['Unassigned'] if r in set(regions)]
+    handles = [Line2D([], [], color=REGION_COLOR[r], marker='s', ls='', ms=5, label=r) for r in present]
+    leg = ax.legend(handles=handles, loc=loc, frameon=False, title='Region', **kw)
+    ax.add_artist(leg)
+    return leg
+
 
 # ----------------------------------------------------------------------------- helpers
 LETTER_PT = 12
@@ -542,8 +590,9 @@ def strip_by_type_sessions(ax, tables, ycol, ylabel, zero_line=None, log=False, 
 
 
 def area_order(areas):
-    """Frontal areas first, then the others, each alphabetical."""
-    return sorted(areas, key=lambda a: (area_group(a) != 'frontal', a))
+    """Frontal areas first, then the other regions in REGION_ORDER, alphabetical within a region."""
+    rank = {r: i for i, r in enumerate(REGION_ORDER + ['Unassigned'])}
+    return sorted(areas, key=lambda a: (rank[area_region(a)], a))
 
 
 def r2_at_dimensionality(res):
