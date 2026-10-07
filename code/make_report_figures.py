@@ -378,17 +378,17 @@ def subspace_decoding_panel(ax, tables, pooled):
     ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
     ax.set_xlabel('pair type (source → target)')
     # each pair type vs. its block-permutation null: mark next to the tick label
-    labels = []
-    for i, typ in enumerate(PAIR_TYPES):
+    for i, typ in enumerate(PAIR_TYPES):                 # significance mark just above each pair type's points
         sub = pooled[pooled['pair_type'] == typ]
         p_typ = stats.wilcoxon(sub['sub_acc_cv'] - sub['sub_acc_block_null_mean']).pvalue
-        labels.append(f'{SHORT[typ]}\n{"*" if p_typ < 0.05 else "n.s."}')
-    ax.set_xticklabels(labels)
+        ax.text(i, sub['sub_acc_cv'].max() + 0.012, stars(p_typ), ha='center', va='bottom',
+                fontsize=8 if p_typ < 0.05 else 6.5)
+    ax.set_xticklabels([SHORT[typ] for typ in PAIR_TYPES])
     # group means and the frontal → vs. other → comparison over pairs
     fr = pooled['pair_type'].str.startswith('frontal')
     p_fr = stats.mannwhitneyu(pooled['sub_acc_cv'][fr], pooled['sub_acc_cv'][~fr]).pvalue
     m_fr, m_ot = pooled['sub_acc_cv'][fr].mean(), pooled['sub_acc_cv'][~fr].mean()
-    group_bars_and_bracket(ax, [0, 1], [2, 3], m_fr, m_ot, p_fr, yb=0.9)
+    group_bars_and_bracket(ax, [0, 1], [2, 3], m_fr, m_ot, p_fr, yb=0.93)
     ax.set_title(f'Comm. subspace: context decoding\nfrontal→ {m_fr:.0%} vs. others→ {m_ot:.0%}, {p_text(p_fr)}', loc='left')
     h = [Line2D([], [], marker='o', color='0.4', ls='', ms=4, label='Above null'),
          Line2D([], [], marker='o', mfc='white', mec='0.4', ls='', ms=4, label='Not above null')]
