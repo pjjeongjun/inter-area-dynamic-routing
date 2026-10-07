@@ -326,10 +326,11 @@ def figure_r2(results, out_dir):
 
     # C: source-side excess against the source axis's decoding accuracy, qualified pairs only
     for k, t in enumerate(tables):
-        for g in GROUP_COLOR:
-            sub = t[t['source'].map(area_group) == g]        # boolean Series: safe when t is empty
-            axC.scatter(sub['source_acc_cv'], sub['excess'], s=14, marker=MARKERS[k % len(MARKERS)], color=GROUP_COLOR[g], edgecolor='k',
-                        linewidth=0.3)
+        regions = t['source'].map(area_region)
+        for reg in regions.unique():                           # colour = region of the source area (legend beside A/B)
+            sub = t[regions == reg]
+            axC.scatter(sub['source_acc_cv'], sub['excess'], s=14, marker=MARKERS[k % len(MARKERS)], color=REGION_COLOR[reg],
+                        edgecolor='k', linewidth=0.3)
     axC.axhline(0, color='k', ls='--', lw=0.7)
     rho, pval = stats.spearmanr(pooled['source_acc_cv'], pooled['excess'])
     fit = stats.linregress(pooled['source_acc_cv'], pooled['excess'])
@@ -341,12 +342,8 @@ def figure_r2(results, out_dir):
     axC.set_ylabel(ylab)
     axC.set_title('Alignment vs. context decoding', loc='left')
     axC.text(0.03, 0.97, f'ρ = {rho:.2f}, {p_text(pval)}', transform=axC.transAxes, va='top', fontsize=6.5)
-    m.group_legend(axC, loc='lower right', handletextpad=0.3)
 
-    axD = fig.add_subplot(gs[1, 1])
-    cross_block_panel(axD)
-
-    place_letters(fig, [axA, axB, axC, axD], 'ABCD', dx=-0.075)
+    place_letters(fig, [axA, axB, axC], 'ABC', dx=-0.075)
     save(fig, out_dir / 'figure_R2_alignment.svg')
 
 
@@ -378,7 +375,7 @@ def subspace_decoding_panel(ax, tables, pooled):
     ax.set_xlim(-0.6, len(PAIR_TYPES) - 0.2)
     ax.set_ylabel('context decoding accuracy\n(held-out blocks)')
     ax.axhline(0.5, color='k', ls='--', lw=0.7)
-    ax.set_ylim(0.3, 0.9)
+    ax.set_ylim(0.2, 0.9)
     ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
     ax.set_xlabel('pair type (source → target)')
     # each pair type vs. its block-permutation null: mark next to the tick label
