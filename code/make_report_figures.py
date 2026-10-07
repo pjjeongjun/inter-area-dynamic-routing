@@ -158,6 +158,12 @@ def acc_area_panel(ax, areas_tab, order):
     i_fr = [i for i, a in enumerate(order) if area_group(a) == 'frontal']
     i_ot = [i for i, a in enumerate(order) if area_group(a) != 'frontal']
     group_bars_and_bracket(ax, i_fr, i_ot, fr.mean(), ot.mean(), p_fr, yb=0.945, h=0.015)
+    # each group vs. its block-permutation null (Wilcoxon on accuracy − null mean, over area instances); one common height
+    y_mark = float((areas_tab['acc_cv'] + areas_tab['acc_cv_sd']).max()) + 0.012
+    for xs, mask in ((i_fr, grp == 'frontal'), (i_ot, grp != 'frontal')):
+        d = areas_tab.loc[mask, 'acc_cv'] - areas_tab.loc[mask, 'acc_block_null_mean']
+        p_grp = stats.wilcoxon(d).pvalue
+        ax.text(np.mean([min(xs), max(xs)]), y_mark, stars(p_grp), ha='center', va='bottom', fontsize=8 if p_grp < 0.05 else 6.5)
     ax.set_title(f'Context axis (LDA): context decoding\nfrontal {fr.mean():.0%} vs. others {ot.mean():.0%}, {p_text(p_fr)}',
                  loc='left')
     return p_fr
