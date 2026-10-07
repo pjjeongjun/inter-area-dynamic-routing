@@ -377,11 +377,11 @@ def subspace_decoding_panel(ax, tables, pooled):
     ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
     ax.set_xlabel('pair type (source → target)')
     # each pair type vs. its block-permutation null: mark next to the tick label
-    for i, typ in enumerate(PAIR_TYPES):                 # significance mark just above each pair type's points
+    y_mark = pooled['sub_acc_cv'].max() + 0.012          # one common height so the marks do not encode a value
+    for i, typ in enumerate(PAIR_TYPES):                 # each pair type vs. its block-permutation null
         sub = pooled[pooled['pair_type'] == typ]
         p_typ = stats.wilcoxon(sub['sub_acc_cv'] - sub['sub_acc_block_null_mean']).pvalue
-        ax.text(i, sub['sub_acc_cv'].max() + 0.012, stars(p_typ), ha='center', va='bottom',
-                fontsize=8 if p_typ < 0.05 else 6.5)
+        ax.text(i, y_mark, stars(p_typ), ha='center', va='bottom', fontsize=8 if p_typ < 0.05 else 6.5)
     ax.set_xticklabels([SHORT[typ] for typ in PAIR_TYPES])
     # group means and the frontal → vs. other → comparison over pairs
     fr = pooled['pair_type'].str.startswith('frontal')
