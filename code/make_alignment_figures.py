@@ -668,7 +668,7 @@ def figure2_pooled(results, out_dir: Path):
     # B: the same excess vs source-axis accuracy, qualified pairs only
     for k, t in enumerate(tables):
         for g in GROUP_COLOR:
-            sub = t[[area_group(a) == g for a in t['source']]]
+            sub = t[t['source'].map(area_group) == g]        # boolean Series: safe when t is empty
             axB.scatter(sub['source_acc_cv'], sub['excess'], s=18, marker=MARKERS[k % len(MARKERS)], color=GROUP_COLOR[g],
                         edgecolor='k', linewidth=0.3)
     axB.axhline(0, color='k', ls='--', lw=0.7)

@@ -245,12 +245,17 @@ def alignment_by_area_panel(ax, pooled, area_col, excess, order, frontal_mask):
     for lab, a in zip(ax.get_xticklabels(), order):
         lab.set_color(GROUP_COLOR[area_group(a)])
     ax.set_xlim(-0.6, len(order) - 0.4)
-    p_fr = stats.mannwhitneyu(excess[frontal_mask], excess[~frontal_mask]).pvalue
+    frontal_mask = np.asarray(frontal_mask, dtype=bool)
     i_fr = [i for i, a in enumerate(order) if area_group(a) == 'frontal']
     i_ot = [i for i, a in enumerate(order) if area_group(a) != 'frontal']
     for g, mask, grp in ((i_fr, frontal_mask, 'frontal'), (i_ot, ~frontal_mask, 'other')):
-        ax.plot([min(g) - 0.35, max(g) + 0.35], [excess[mask].mean()] * 2, color=GROUP_COLOR[grp], lw=2.0, alpha=0.45, zorder=2,
-                solid_capstyle='butt')
+        if g and mask.any():        # group mean bar only when the group has pairs
+            ax.plot([min(g) - 0.35, max(g) + 0.35], [excess[mask].mean()] * 2, color=GROUP_COLOR[grp], lw=2.0, alpha=0.45,
+                    zorder=2, solid_capstyle='butt')
+    # frontal-vs-other comparison needs both groups (one session alone may have only one)
+    if not i_fr or not i_ot or frontal_mask.sum() < 2 or (~frontal_mask).sum() < 2:
+        return np.nan
+    p_fr = stats.mannwhitneyu(excess[frontal_mask], excess[~frontal_mask]).pvalue
     yb = 0.64
     for g in (i_fr, i_ot):
         ax.plot([min(g), min(g), max(g), max(g)], [yb - 0.025, yb, yb, yb - 0.025], color='k', lw=0.8)
@@ -296,7 +301,7 @@ def figure_r2(results, out_dir):
     # C: source-side excess against the source axis's decoding accuracy, qualified pairs only
     for k, t in enumerate(tables):
         for g in GROUP_COLOR:
-            sub = t[[area_group(a) == g for a in t['source']]]
+            sub = t[t['source'].map(area_group) == g]        # boolean Series: safe when t is empty
             axC.scatter(sub['source_acc_cv'], sub['excess'], s=14, marker=MARKERS[k % len(MARKERS)], color=GROUP_COLOR[g], edgecolor='k',
                         linewidth=0.3)
     axC.axhline(0, color='k', ls='--', lw=0.7)
