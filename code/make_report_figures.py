@@ -30,7 +30,7 @@ from scipy import stats
 
 import make_alignment_figures as m
 from make_alignment_figures import (FDR_ALPHA, GROUP_COLOR, MARKERS, PAIR_COLOR, PAIR_LABEL, PAIR_TYPES, REGION_COLOR,
-                                    area_group, area_region, region_legend,
+                                    area_color, area_group, area_region, region_legend,
                                     area_order, place_letters, qualify, r2_at_dimensionality, save)
 
 plt.rcParams.update({'font.size': 7, 'axes.titlesize': 7.5, 'axes.labelsize': 7, 'xtick.labelsize': 6.5,
@@ -53,8 +53,9 @@ def short_type_ticks(ax):
     ax.set_xticklabels([SHORT[t] for t in PAIR_TYPES])
 
 
-def strip(ax, tables, ycol, ylabel, zero_line=None, log=False, show_n=False, text_loc='top'):
-    m.strip_by_type_sessions(ax, tables, ycol, ylabel, zero_line=zero_line, log=log, show_n=show_n, text_loc=text_loc)
+def strip(ax, tables, ycol, ylabel, zero_line=None, log=False, show_n=False, text_loc='top', color_by=None):
+    m.strip_by_type_sessions(ax, tables, ycol, ylabel, zero_line=zero_line, log=log, show_n=show_n, text_loc=text_loc,
+                             color_by=color_by)
     short_type_ticks(ax)
 
 
@@ -135,7 +136,7 @@ def acc_area_panel(ax, areas_tab, order):
         for (_, r), dx in zip(rows.iterrows(), offs):
             k = SESSIONS.index(r['session'])
             pred = bool(r['acc_predictive'])
-            c = REGION_COLOR[area_region(a)]
+            c = area_color(a)
             ax.plot([i + dx, i + dx], [r['acc_block_null_lo'], r['acc_block_null_hi']], color='0.8', lw=3.2 if len(rows) > 1 else 4,
                     solid_capstyle='butt', alpha=0.6, zorder=1)
             ax.errorbar(i + dx, r['acc_cv'], yerr=r['acc_cv_sd'], fmt=MARKERS[k % len(MARKERS)], ms=4.2, color=c, mfc=c if pred else 'white',
@@ -143,7 +144,7 @@ def acc_area_panel(ax, areas_tab, order):
     ax.set_xticks(range(len(order)))
     ax.set_xticklabels(order, rotation=90)
     for lab, a in zip(ax.get_xticklabels(), order):
-        lab.set_color(REGION_COLOR[area_region(a)])
+        lab.set_color(area_color(a))
     ax.set_xlim(-0.7, len(order) - 0.3)
     ax.axhline(0.5, color='k', ls='--', lw=0.7)
     ax.set_ylim(0.2, 1.0)
@@ -177,7 +178,7 @@ def figure_r1(results, out_dir):
     axL = fig.add_subplot(sub[0, 1])
     axL.axis('off')
 
-    strip(axA, tables, 'r2_cv_dim', 'cross-validated R²\n(rank-d fit, held-out trials)')
+    strip(axA, tables, 'r2_cv_dim', 'cross-validated R²\n(rank-d fit, held-out trials)', color_by='target')
     axA.set_ylim(0, pooled['r2_cv_dim'].max() * 1.15)
     axA.axhline(0, color='k', ls='--', lw=0.7)
     axA.set_xlabel('pair type (source → target)')
@@ -195,7 +196,7 @@ def figure_r1(results, out_dir):
     leg_null = axL.legend(handles=h, loc='lower left', bbox_to_anchor=(0.0, 0.0), frameon=False, handletextpad=0.3,
                           labelspacing=0.3, borderaxespad=0.0, fontsize=5.5)
     axL.add_artist(leg_null)
-    region_legend(axL, [area_region(a) for a in areas_tab['area'].unique()], loc='upper left', bbox_to_anchor=(0.0, 1.0),
+    region_legend(axL, areas_tab['area'].unique(), loc='upper left', bbox_to_anchor=(0.0, 1.0),
                   handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0, fontsize=5.5, title_fontsize=6)
     session_legend(axL, 'upper right', bbox_to_anchor=(1.0, 1.0), handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0,
                    fontsize=5.5)
@@ -252,13 +253,13 @@ def alignment_by_area_panel(ax, pooled, area_col, excess, order, frontal_mask, y
             m_ = sel & (pooled['session'] == sid).values
             if m_.any():
                 ax.scatter(i + rng.uniform(-0.15, 0.15, int(m_.sum())), excess[m_].values, s=12,
-                           marker=MARKERS[SESSIONS.index(sid) % len(MARKERS)], color=REGION_COLOR[area_region(a)],
+                           marker=MARKERS[SESSIONS.index(sid) % len(MARKERS)], color=area_color(a),
                            edgecolor='k', linewidth=0.3, zorder=3)
     ax.axhline(0, color='k', ls='--', lw=0.7)
     ax.set_xticks(range(len(order)))
     ax.set_xticklabels(order, rotation=90)
     for lab, a in zip(ax.get_xticklabels(), order):
-        lab.set_color(REGION_COLOR[area_region(a)])
+        lab.set_color(area_color(a))
     ax.set_xlim(-0.6, len(order) - 0.4)
     frontal_mask = np.asarray(frontal_mask, dtype=bool)
     i_fr = [i for i, a in enumerate(order) if area_group(a) == 'frontal']
@@ -296,7 +297,7 @@ def figure_r2(results, out_dir):
     axC = fig.add_subplot(gs[1, 0:2], sharey=axA)             # full bottom row (panel D was removed)
     axL = fig.add_subplot(gs[0, 2])                      # session legend shared by A and B
     axL.axis('off')
-    region_legend(axL, [area_region(a) for a in set(pooled['source']) | set(pooled_t['target'])], loc='center right',
+    region_legend(axL, set(pooled['source']) | set(pooled_t['target']), loc='center right',
                   bbox_to_anchor=(1.0, 0.5), handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0, fontsize=5.5, title_fontsize=6)
     axL2 = fig.add_subplot(gs[1, 2])                     # session legend (marker shapes used in every panel)
     axL2.axis('off')
@@ -323,11 +324,9 @@ def figure_r2(results, out_dir):
 
     # C: source-side excess against the source axis's decoding accuracy, qualified pairs only
     for k, t in enumerate(tables):
-        regions = t['source'].map(area_region)
-        for reg in regions.unique():                           # colour = region of the source area (legend beside A/B)
-            sub = t[regions == reg]
-            axC.scatter(sub['source_acc_cv'], sub['excess'], s=14, marker=MARKERS[k % len(MARKERS)], color=REGION_COLOR[reg],
-                        edgecolor='k', linewidth=0.3)
+        if len(t):                                             # colour = region / frontal subgroup of the source area
+            axC.scatter(t['source_acc_cv'], t['excess'], s=14, marker=MARKERS[k % len(MARKERS)],
+                        c=[area_color(a) for a in t['source']], edgecolor='k', linewidth=0.3)
     axC.axhline(0, color='k', ls='--', lw=0.7)
     rho, pval = stats.spearmanr(pooled['source_acc_cv'], pooled['excess'])
     fit = stats.linregress(pooled['source_acc_cv'], pooled['excess'])
@@ -364,8 +363,8 @@ def subspace_decoding_panel(ax, tables, pooled):
             n = len(sub)
             x, yv, q = xall[pos:pos + n], yall[pos:pos + n], sub['sub_acc_predictive'].values.astype(bool)
             pos += n
-            ax.scatter(x[q], yv[q], s=14, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[typ], edgecolor='k', linewidth=0.3, zorder=3)
-            ax.scatter(x[~q], yv[~q], s=14, marker=MARKERS[k % len(MARKERS)], color='white', edgecolor=PAIR_COLOR[typ], linewidth=0.7,
+            ax.scatter(x[q], yv[q], s=14, marker=MARKERS[k % len(MARKERS)], c=[area_color(t_) for t_ in sub['target'].values[q]], edgecolor='k', linewidth=0.3, zorder=3)
+            ax.scatter(x[~q], yv[~q], s=14, marker=MARKERS[k % len(MARKERS)], color='white', edgecolor=[area_color(t_) for t_ in sub['target'].values[~q]], linewidth=0.7,
                        zorder=3)
     ax.set_xticks(range(len(PAIR_TYPES)))
     short_type_ticks(ax)

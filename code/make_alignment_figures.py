@@ -78,10 +78,30 @@ def area_region(area: str) -> str:
     return REGION_OF.get(area, 'Unassigned')
 
 
-def region_legend(ax, regions, loc='upper left', **kw):
-    """Square colour swatches for the regions present (in REGION_ORDER)."""
-    present = [r for r in REGION_ORDER + ['Unassigned'] if r in set(regions)]
-    handles = [Line2D([], [], color=REGION_COLOR[r], marker='s', ls='', ms=5, label=r) for r in present]
+# Frontal cortex split into subgroups, each a shade of blue (statistics still pool all frontal areas)
+FRONTAL_SUBGROUP = {'ACAd': 'Frontal: mPFC', 'ACAv': 'Frontal: mPFC', 'PL': 'Frontal: mPFC', 'ILA': 'Frontal: mPFC',
+                    'MOs': 'Frontal: MOs', 'FRP': 'Frontal: MOs',
+                    'ORBl': 'Frontal: ORB', 'ORBm': 'Frontal: ORB', 'ORBvl': 'Frontal: ORB',
+                    'AId': 'Frontal: AI', 'AIv': 'Frontal: AI', 'AIp': 'Frontal: AI'}
+SUBGROUP_ORDER = ['Frontal: mPFC', 'Frontal: MOs', 'Frontal: ORB', 'Frontal: AI']
+SUBGROUP_COLOR = {'Frontal: mPFC': '#123f7a', 'Frontal: MOs': '#1f6fb2', 'Frontal: ORB': '#4a95d6', 'Frontal: AI': '#86bde8'}
+
+
+def area_color(area: str) -> str:
+    """Marker colour of an area: a blue shade per frontal subgroup, otherwise the region colour."""
+    if area_group(area) == 'frontal':
+        return SUBGROUP_COLOR[FRONTAL_SUBGROUP.get(area, 'Frontal: MOs')]
+    return REGION_COLOR[area_region(area)]
+
+
+def region_legend(ax, areas, loc='upper left', **kw):
+    """Square colour swatches: one per frontal subgroup present, then one per non-frontal region present."""
+    areas = set(areas)
+    sub_present = {FRONTAL_SUBGROUP.get(a, 'Frontal: MOs') for a in areas if area_group(a) == 'frontal'}
+    reg_present = {area_region(a) for a in areas if area_group(a) != 'frontal'}
+    handles = [Line2D([], [], color=SUBGROUP_COLOR[g], marker='s', ls='', ms=5, label=g) for g in SUBGROUP_ORDER if g in sub_present]
+    handles += [Line2D([], [], color=REGION_COLOR[r], marker='s', ls='', ms=5, label=r)
+                for r in REGION_ORDER + ['Unassigned'] if r in reg_present]
     leg = ax.legend(handles=handles, loc=loc, frameon=False, title='Region', **kw)
     ax.add_artist(leg)
     return leg
@@ -557,7 +577,7 @@ def session_legend(ax, sessions, loc='lower right'):
     ax.legend(handles=h, loc=loc, frameon=False, title='session')
 
 
-def strip_by_type_sessions(ax, tables, ycol, ylabel, zero_line=None, log=False, text_loc='top', show_n=True):
+def strip_by_type_sessions(ax, tables, ycol, ylabel, zero_line=None, log=False, text_loc='top', show_n=True, color_by=None):
     """Like strip_by_type, but one marker shape per session."""
     rng = np.random.default_rng(0)
     pooled = pd.concat(tables, ignore_index=True)
@@ -567,7 +587,8 @@ def strip_by_type_sessions(ax, tables, ycol, ylabel, zero_line=None, log=False, 
             if sub.empty:
                 continue
             x = i + rng.uniform(-0.2, 0.2, len(sub))
-            ax.scatter(x, sub[ycol], s=16, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[t], edgecolor='k',
+            col = [area_color(a) for a in sub[color_by]] if color_by else PAIR_COLOR[t]   # e.g. color_by='target'
+            ax.scatter(x, sub[ycol], s=16, marker=MARKERS[k % len(MARKERS)], c=col, edgecolor='k',
                        linewidth=0.3, zorder=3)
         sub = pooled[pooled['pair_type'] == t]
         if len(sub) > 1:
@@ -592,7 +613,9 @@ def strip_by_type_sessions(ax, tables, ycol, ylabel, zero_line=None, log=False, 
 def area_order(areas):
     """Frontal areas first, then the other regions in REGION_ORDER, alphabetical within a region."""
     rank = {r: i for i, r in enumerate(REGION_ORDER + ['Unassigned'])}
-    return sorted(areas, key=lambda a: (rank[area_region(a)], a))
+    sub_rank = {g: i for i, g in enumerate(SUBGROUP_ORDER)}
+    return sorted(areas, key=lambda a: (rank[area_region(a)], sub_rank.get(FRONTAL_SUBGROUP.get(a, 'Frontal: MOs'), 0)
+                                        if area_group(a) == 'frontal' else 0, a))
 
 
 def r2_at_dimensionality(res):
