@@ -69,7 +69,7 @@ REGION_OF = {
 }
 REGION_COLOR = {'Frontal cortex': '#1f6fb2', 'Other neocortex': '#c9262c', 'Olfactory cortex': '#8c564b',
                 'Hippocampal formation': '#2ca02c', 'Striatum / septum': '#9467bd', 'Thalamus': '#e377c2',
-                'Midbrain': '#17becf', 'Unassigned': '#7f7f7f'}
+                'Midbrain': '#b5a800', 'Unassigned': '#7f7f7f'}
 
 
 def area_region(area: str) -> str:
@@ -84,7 +84,7 @@ FRONTAL_SUBGROUP = {'ACAd': 'Frontal: mPFC', 'ACAv': 'Frontal: mPFC', 'PL': 'Fro
                     'ORBl': 'Frontal: ORB', 'ORBm': 'Frontal: ORB', 'ORBvl': 'Frontal: ORB',
                     'AId': 'Frontal: AI', 'AIv': 'Frontal: AI', 'AIp': 'Frontal: AI'}
 SUBGROUP_ORDER = ['Frontal: mPFC', 'Frontal: MOs', 'Frontal: ORB', 'Frontal: AI']
-SUBGROUP_COLOR = {'Frontal: mPFC': '#123f7a', 'Frontal: MOs': '#1f6fb2', 'Frontal: ORB': '#4a95d6', 'Frontal: AI': '#86bde8'}
+SUBGROUP_COLOR = {'Frontal: mPFC': '#0d2d6b', 'Frontal: MOs': '#2b6cb8', 'Frontal: ORB': '#2fa4e7', 'Frontal: AI': '#9bc4ea'}
 
 
 def area_color(area: str) -> str:

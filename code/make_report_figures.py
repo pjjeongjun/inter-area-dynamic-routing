@@ -140,7 +140,7 @@ def acc_area_panel(ax, areas_tab, order):
             ax.plot([i + dx, i + dx], [r['acc_block_null_lo'], r['acc_block_null_hi']], color='0.8', lw=3.2 if len(rows) > 1 else 4,
                     solid_capstyle='butt', alpha=0.6, zorder=1)
             ax.errorbar(i + dx, r['acc_cv'], yerr=r['acc_cv_sd'], fmt=MARKERS[k % len(MARKERS)], ms=4.2, color=c, mfc=c if pred else 'white',
-                        mec=c, mew=0.8, elinewidth=0.6, capsize=0, zorder=3)
+                        mec=c, mew=0.8 if pred else 1.3, elinewidth=0.6, capsize=0, zorder=3)
     ax.set_xticks(range(len(order)))
     ax.set_xticklabels(order, rotation=90)
     for lab, a in zip(ax.get_xticklabels(), order):
@@ -364,7 +364,7 @@ def subspace_decoding_panel(ax, tables, pooled):
             x, yv, q = xall[pos:pos + n], yall[pos:pos + n], sub['sub_acc_predictive'].values.astype(bool)
             pos += n
             ax.scatter(x[q], yv[q], s=14, marker=MARKERS[k % len(MARKERS)], c=[area_color(t_) for t_ in sub['target'].values[q]], edgecolor='k', linewidth=0.3, zorder=3)
-            ax.scatter(x[~q], yv[~q], s=14, marker=MARKERS[k % len(MARKERS)], color='white', edgecolor=[area_color(t_) for t_ in sub['target'].values[~q]], linewidth=0.7,
+            ax.scatter(x[~q], yv[~q], s=14, marker=MARKERS[k % len(MARKERS)], color='white', edgecolor=[area_color(t_) for t_ in sub['target'].values[~q]], linewidth=1.1,
                        zorder=3)
     ax.set_xticks(range(len(PAIR_TYPES)))
     short_type_ticks(ax)
