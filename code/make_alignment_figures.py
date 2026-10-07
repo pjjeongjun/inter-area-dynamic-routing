@@ -41,7 +41,7 @@ EXTRA_PNG_DIR = os.environ.get('ALIGN_QC_DIR')  # optional PNG previews outside 
 # Finer anatomical grouping of the recorded areas (Allen CCF ontology), used to colour and order the
 # by-area panels. Statistics still compare frontal cortex against everything else.
 REGION_ORDER = ['Frontal cortex', 'Other neocortex', 'Olfactory cortex', 'Hippocampal formation',
-                'Striatum / septum', 'Thalamus', 'Midbrain']
+                'Striatum / Septum', 'Thalamus', 'Midbrain']
 REGION_OF = {
     # neocortex outside the frontal set: sensory, motor and association areas
     'MOp': 'Other neocortex', 'SSp': 'Other neocortex', 'SSs': 'Other neocortex', 'VISp': 'Other neocortex',
@@ -58,8 +58,8 @@ REGION_OF = {
     'POST': 'Hippocampal formation', 'PRE': 'Hippocampal formation', 'ENTl': 'Hippocampal formation',
     'ENTm': 'Hippocampal formation',
     # striatum and lateral septal complex
-    'CP': 'Striatum / septum', 'ACB': 'Striatum / septum', 'LSr': 'Striatum / septum', 'LSc': 'Striatum / septum',
-    'LSv': 'Striatum / septum', 'FS': 'Striatum / septum',
+    'CP': 'Striatum / Septum', 'ACB': 'Striatum / Septum', 'LSr': 'Striatum / Septum', 'LSc': 'Striatum / Septum',
+    'LSv': 'Striatum / Septum', 'FS': 'Striatum / Septum',
     # thalamus
     'MGv': 'Thalamus', 'MGd': 'Thalamus', 'MGm': 'Thalamus', 'PoT': 'Thalamus', 'PO': 'Thalamus', 'LP': 'Thalamus',
     'LGd': 'Thalamus', 'VPM': 'Thalamus', 'VPL': 'Thalamus', 'MD': 'Thalamus', 'VAL': 'Thalamus', 'VM': 'Thalamus',
@@ -68,7 +68,7 @@ REGION_OF = {
     'SNr': 'Midbrain', 'SNc': 'Midbrain', 'VTA': 'Midbrain', 'IC': 'Midbrain', 'NOT': 'Midbrain', 'MB': 'Midbrain',
 }
 REGION_COLOR = {'Frontal cortex': '#1f6fb2', 'Other neocortex': '#c9262c', 'Olfactory cortex': '#8c564b',
-                'Hippocampal formation': '#2ca02c', 'Striatum / septum': '#9467bd', 'Thalamus': '#e377c2',
+                'Hippocampal formation': '#2ca02c', 'Striatum / Septum': '#9467bd', 'Thalamus': '#e377c2',
                 'Midbrain': '#b5a800', 'Unassigned': '#7f7f7f'}
 
 
