@@ -244,7 +244,7 @@ def excess_strip(ax, tables, col, chance_col, ylabel):
     return pd.concat(tabs, ignore_index=True)
 
 
-def alignment_by_area_panel(ax, pooled, area_col, excess, order, frontal_mask):
+def alignment_by_area_panel(ax, pooled, area_col, excess, order, frontal_mask, yb=0.74):
     """Alignment excess (observed − chance cosine) per area, one point per qualified pair; coloured bars = mean over all
     pairs whose plotted area is frontal / not frontal, compared by the bracket (Mann–Whitney)."""
     rng = np.random.default_rng(0)
@@ -273,7 +273,7 @@ def alignment_by_area_panel(ax, pooled, area_col, excess, order, frontal_mask):
     if not i_fr or not i_ot or frontal_mask.sum() < 2 or (~frontal_mask).sum() < 2:
         return np.nan
     p_fr = stats.mannwhitneyu(excess[frontal_mask], excess[~frontal_mask]).pvalue
-    yb = 0.64
+    yb = max(yb, float(excess.max()) + 0.06)
     for g in (i_fr, i_ot):
         ax.plot([min(g), min(g), max(g), max(g)], [yb - 0.025, yb, yb, yb - 0.025], color='k', lw=0.8)
     c_fr, c_ot = np.mean([min(i_fr), max(i_fr)]), np.mean([min(i_ot), max(i_ot)])
@@ -292,7 +292,7 @@ def figure_r2(results, out_dir):
     ylab = 'Alignment\n(cosine − shuffled-label null)'
 
     fig = plt.figure(figsize=(W, 5.9))
-    gs = fig.add_gridspec(2, 3, width_ratios=[1, 1, 0.45], hspace=0.62, wspace=0.32, left=0.1, right=0.985, top=0.93, bottom=0.11)
+    gs = fig.add_gridspec(2, 3, width_ratios=[1, 1, 0.45], hspace=0.62, wspace=0.18, left=0.1, right=0.985, top=0.93, bottom=0.11)
     axA = fig.add_subplot(gs[0, 0])
     axB = fig.add_subplot(gs[0, 1], sharey=axA)
     axC = fig.add_subplot(gs[1, 0:2], sharey=axA)             # full bottom row (panel D was removed)
@@ -300,15 +300,15 @@ def figure_r2(results, out_dir):
     axL.axis('off')
     region_legend(axL, [area_region(a) for a in set(pooled['source']) | set(pooled_t['target'])], loc='center right',
                   bbox_to_anchor=(1.0, 0.5), handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0, fontsize=5.5, title_fontsize=6)
-    axL2 = fig.add_subplot(gs[1, 1])                     # session legend (marker shapes used in every panel)
+    axL2 = fig.add_subplot(gs[1, 2])                     # session legend (marker shapes used in every panel)
     axL2.axis('off')
-    session_legend(axL2, 'center left', bbox_to_anchor=(0.0, 0.5), handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0,
+    session_legend(axL2, 'center right', bbox_to_anchor=(1.0, 0.5), handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0,
                    fontsize=5.5)
 
     # A: source side, by source area; bracket = frontal vs. non-frontal sources
     order = area_order(pooled['source'].unique())
     alignment_by_area_panel(axA, pooled, 'source', pooled['excess'], order, pooled['pair_type'].str.startswith('frontal'))
-    axA.set_ylim(-0.25, 0.8)
+    axA.set_ylim(-0.2, 0.86)
     axA.set_ylabel(ylab)
     axA.set_xlabel('Source area')
     n_up = int(((pooled['cos_shuf_q'] <= FDR_ALPHA) & (pooled['cos_shuf_z'] > 0)).sum())
@@ -318,7 +318,7 @@ def figure_r2(results, out_dir):
     ex_t = pooled_t['excess_tgt']
     order_t = area_order(pooled_t['target'].unique())
     alignment_by_area_panel(axB, pooled_t, 'target', ex_t, order_t, pooled_t['pair_type'].str.endswith('frontal'))
-    axB.set_ylabel(ylab)
+    axB.set_ylabel('')                                   # y axis shared with A (label drawn once)
     axB.set_xlabel('Target area')
     n_up_t = int(((pooled_t['cos_tgt_shuf_q'] <= FDR_ALPHA) & (pooled_t['cos_tgt_shuf_z'] > 0)).sum())
     axB.set_title(f'Target side: alignment by area\n{n_up_t}/{len(pooled_t)} pairs above the null', loc='left')
