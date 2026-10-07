@@ -116,11 +116,15 @@ def group_bars_and_bracket(ax, x_fr, x_ot, mean_fr, mean_ot, p, yb):
 
     for xs, mval, col in ((x_fr, mean_fr, GROUP_COLOR['frontal']), (x_ot, mean_ot, OTHERS_BAR)):
         ax.plot([min(xs) - 0.35, max(xs) + 0.35], [mval] * 2, color=col, lw=2.0, alpha=0.45, zorder=2, solid_capstyle='butt')
+    h = 0.02
     for xs in (x_fr, x_ot):
-        ax.plot([min(xs), min(xs), max(xs), max(xs)], [yb - 0.02, yb, yb, yb - 0.02], color='k', lw=0.8)
+        ax.plot([min(xs), min(xs), max(xs), max(xs)], [yb - h, yb, yb, yb - h], color='k', lw=0.8)
     c_fr, c_ot = np.mean([min(x_fr), max(x_fr)]), np.mean([min(x_ot), max(x_ot)])
-    ax.plot([c_fr, c_fr, c_ot, c_ot], [yb + 0.01, yb + 0.04, yb + 0.04, yb + 0.01], color='k', lw=0.8)
-    ax.text((c_fr + c_ot) / 2, yb + 0.04, stars(p), ha='center', va='bottom', fontsize=8 if p < 0.05 else 6.5)
+    yc = yb + 0.012
+    ax.plot([c_fr, c_fr, c_ot, c_ot], [yc, yc + h, yc + h, yc], color='k', lw=0.8)
+    # the label sits on the connector (white box), so the bracket stays inside a 30-90% axis
+    ax.text((c_fr + c_ot) / 2, yc + h, stars(p), ha='center', va='center', fontsize=8 if p < 0.05 else 6.5,
+            bbox=dict(facecolor='white', edgecolor='none', pad=0.6), zorder=5)
 
 
 def acc_area_panel(ax, areas_tab, order):
@@ -155,7 +159,7 @@ def acc_area_panel(ax, areas_tab, order):
     p_fr = stats.mannwhitneyu(fr, ot).pvalue
     i_fr = [i for i, a in enumerate(order) if area_group(a) == 'frontal']
     i_ot = [i for i, a in enumerate(order) if area_group(a) != 'frontal']
-    group_bars_and_bracket(ax, i_fr, i_ot, fr.mean(), ot.mean(), p_fr, yb=0.86)
+    group_bars_and_bracket(ax, i_fr, i_ot, fr.mean(), ot.mean(), p_fr, yb=0.855)
     ax.set_title(f'Context axis (LDA): context decoding\nfrontal {fr.mean():.0%} vs. others {ot.mean():.0%} over area instances, {p_text(p_fr)}',
                  loc='left')
     return p_fr
@@ -388,7 +392,7 @@ def subspace_decoding_panel(ax, tables, pooled):
     fr = pooled['pair_type'].str.startswith('frontal')
     p_fr = stats.mannwhitneyu(pooled['sub_acc_cv'][fr], pooled['sub_acc_cv'][~fr]).pvalue
     m_fr, m_ot = pooled['sub_acc_cv'][fr].mean(), pooled['sub_acc_cv'][~fr].mean()
-    group_bars_and_bracket(ax, [0, 1], [2, 3], m_fr, m_ot, p_fr, yb=0.86)
+    group_bars_and_bracket(ax, [0, 1], [2, 3], m_fr, m_ot, p_fr, yb=0.855)
     ax.set_title(f'Comm. subspace: context decoding\nfrontal→ {m_fr:.0%} vs. others→ {m_ot:.0%}, {p_text(p_fr)}', loc='left')
     h = [Line2D([], [], marker='o', color='0.4', ls='', ms=4, label='Above null'),
          Line2D([], [], marker='o', mfc='white', mec='0.4', ls='', ms=4, label='Not above null')]
