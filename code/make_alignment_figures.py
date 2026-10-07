@@ -40,15 +40,15 @@ EXTRA_PNG_DIR = os.environ.get('ALIGN_QC_DIR')  # optional PNG previews outside 
 
 # Finer anatomical grouping of the recorded areas (Allen CCF ontology), used to colour and order the
 # by-area panels. Statistics still compare frontal cortex against everything else.
-REGION_ORDER = ['Frontal cortex', 'Other isocortex', 'Olfactory cortex', 'Hippocampal formation',
+REGION_ORDER = ['Frontal cortex', 'Other neocortex', 'Olfactory cortex', 'Hippocampal formation',
                 'Striatum / septum', 'Thalamus', 'Midbrain']
 REGION_OF = {
-    # isocortex outside the frontal set: sensory, motor and association areas
-    'MOp': 'Other isocortex', 'SSp': 'Other isocortex', 'SSs': 'Other isocortex', 'VISp': 'Other isocortex',
-    'VISC': 'Other isocortex', 'AUDp': 'Other isocortex', 'AUDpo': 'Other isocortex', 'AUDv': 'Other isocortex',
-    'AUDd': 'Other isocortex', 'TEa': 'Other isocortex', 'ECT': 'Other isocortex', 'PERI': 'Other isocortex',
-    'RSPd': 'Other isocortex', 'RSPv': 'Other isocortex', 'RSPagl': 'Other isocortex', 'PTLp': 'Other isocortex',
-    'VISa': 'Other isocortex', 'VISam': 'Other isocortex', 'VISrl': 'Other isocortex', 'VISl': 'Other isocortex',
+    # neocortex outside the frontal set: sensory, motor and association areas
+    'MOp': 'Other neocortex', 'SSp': 'Other neocortex', 'SSs': 'Other neocortex', 'VISp': 'Other neocortex',
+    'VISC': 'Other neocortex', 'AUDp': 'Other neocortex', 'AUDpo': 'Other neocortex', 'AUDv': 'Other neocortex',
+    'AUDd': 'Other neocortex', 'TEa': 'Other neocortex', 'ECT': 'Other neocortex', 'PERI': 'Other neocortex',
+    'RSPd': 'Other neocortex', 'RSPv': 'Other neocortex', 'RSPagl': 'Other neocortex', 'PTLp': 'Other neocortex',
+    'VISa': 'Other neocortex', 'VISam': 'Other neocortex', 'VISrl': 'Other neocortex', 'VISl': 'Other neocortex',
     # olfactory areas (CCF 'OLF'): piriform, taenia tecta, dorsal peduncular, olfactory tubercle, AON
     'OLF': 'Olfactory cortex', 'PIR': 'Olfactory cortex', 'TTd': 'Olfactory cortex', 'TTv': 'Olfactory cortex',
     'DP': 'Olfactory cortex', 'OT': 'Olfactory cortex', 'AON': 'Olfactory cortex', 'NLOT': 'Olfactory cortex',
@@ -67,7 +67,7 @@ REGION_OF = {
     'MRN': 'Midbrain', 'RN': 'Midbrain', 'SCm': 'Midbrain', 'SCs': 'Midbrain', 'APN': 'Midbrain', 'PAG': 'Midbrain',
     'SNr': 'Midbrain', 'SNc': 'Midbrain', 'VTA': 'Midbrain', 'IC': 'Midbrain', 'NOT': 'Midbrain', 'MB': 'Midbrain',
 }
-REGION_COLOR = {'Frontal cortex': '#1f6fb2', 'Other isocortex': '#d9772b', 'Olfactory cortex': '#8c564b',
+REGION_COLOR = {'Frontal cortex': '#1f6fb2', 'Other neocortex': '#d9772b', 'Olfactory cortex': '#8c564b',
                 'Hippocampal formation': '#2ca02c', 'Striatum / septum': '#9467bd', 'Thalamus': '#e377c2',
                 'Midbrain': '#17becf', 'Unassigned': '#7f7f7f'}
 
