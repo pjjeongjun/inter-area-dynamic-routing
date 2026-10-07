@@ -110,13 +110,12 @@ def p_text(p):
 OTHERS_BAR = '0.3'   # mean bar over all non-frontal areas (grey: the non-frontal regions have their own colours)
 
 
-def group_bars_and_bracket(ax, x_fr, x_ot, mean_fr, mean_ot, p, yb):
+def group_bars_and_bracket(ax, x_fr, x_ot, mean_fr, mean_ot, p, yb, h=0.02):
     """Thick coloured bars at the two group means (spanning the groups' x ranges) and a bracket between the groups
     annotated with the test result."""
 
     for xs, mval, col in ((x_fr, mean_fr, GROUP_COLOR['frontal']), (x_ot, mean_ot, OTHERS_BAR)):
         ax.plot([min(xs) - 0.35, max(xs) + 0.35], [mval] * 2, color=col, lw=2.0, alpha=0.45, zorder=2, solid_capstyle='butt')
-    h = 0.02
     for xs in (x_fr, x_ot):
         ax.plot([min(xs), min(xs), max(xs), max(xs)], [yb - h, yb, yb, yb - h], color='k', lw=0.8)
     c_fr, c_ot = np.mean([min(x_fr), max(x_fr)]), np.mean([min(x_ot), max(x_ot)])
@@ -157,7 +156,7 @@ def acc_area_panel(ax, areas_tab, order):
     p_fr = stats.mannwhitneyu(fr, ot).pvalue
     i_fr = [i for i, a in enumerate(order) if area_group(a) == 'frontal']
     i_ot = [i for i, a in enumerate(order) if area_group(a) != 'frontal']
-    group_bars_and_bracket(ax, i_fr, i_ot, fr.mean(), ot.mean(), p_fr, yb=0.92)
+    group_bars_and_bracket(ax, i_fr, i_ot, fr.mean(), ot.mean(), p_fr, yb=0.945, h=0.015)
     ax.set_title(f'Context axis (LDA): context decoding\nfrontal {fr.mean():.0%} vs. others {ot.mean():.0%} over area instances, {p_text(p_fr)}',
                  loc='left')
     return p_fr
@@ -387,7 +386,7 @@ def subspace_decoding_panel(ax, tables, pooled):
     fr = pooled['pair_type'].str.startswith('frontal')
     p_fr = stats.mannwhitneyu(pooled['sub_acc_cv'][fr], pooled['sub_acc_cv'][~fr]).pvalue
     m_fr, m_ot = pooled['sub_acc_cv'][fr].mean(), pooled['sub_acc_cv'][~fr].mean()
-    group_bars_and_bracket(ax, [0, 1], [2, 3], m_fr, m_ot, p_fr, yb=0.92)
+    group_bars_and_bracket(ax, [0, 1], [2, 3], m_fr, m_ot, p_fr, yb=0.945, h=0.015)
     ax.set_title(f'Comm. subspace: context decoding\nfrontal→ {m_fr:.0%} vs. others→ {m_ot:.0%}, {p_text(p_fr)}', loc='left')
     h = [Line2D([], [], marker='o', color='0.4', ls='', ms=4, label='Above null'),
          Line2D([], [], marker='o', mfc='white', mec='0.4', ls='', ms=4, label='Not above null')]
