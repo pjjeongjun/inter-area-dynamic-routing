@@ -120,11 +120,10 @@ def group_bars_and_bracket(ax, x_fr, x_ot, mean_fr, mean_ot, p, yb):
     for xs in (x_fr, x_ot):
         ax.plot([min(xs), min(xs), max(xs), max(xs)], [yb - h, yb, yb, yb - h], color='k', lw=0.8)
     c_fr, c_ot = np.mean([min(x_fr), max(x_fr)]), np.mean([min(x_ot), max(x_ot)])
-    yc = yb + 0.012
+    yc = yb + 0.045
     ax.plot([c_fr, c_fr, c_ot, c_ot], [yc, yc + h, yc + h, yc], color='k', lw=0.8)
-    # the label sits on the connector (white box), so the bracket stays inside a 30-90% axis
-    ax.text((c_fr + c_ot) / 2, yc + h, stars(p), ha='center', va='center', fontsize=8 if p < 0.05 else 6.5,
-            bbox=dict(facecolor='white', edgecolor='none', pad=0.6), zorder=5)
+    # the label sits in the gap between the group brackets and the connecting bracket
+    ax.text((c_fr + c_ot) / 2, yb + 0.022, stars(p), ha='center', va='center', fontsize=8 if p < 0.05 else 6.5, zorder=5)
 
 
 def acc_area_panel(ax, areas_tab, order):
@@ -301,9 +300,9 @@ def figure_r2(results, out_dir):
     axL.axis('off')
     region_legend(axL, [area_region(a) for a in set(pooled['source']) | set(pooled_t['target'])], loc='center right',
                   bbox_to_anchor=(1.0, 0.5), handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0, fontsize=5.5, title_fontsize=6)
-    axL2 = fig.add_subplot(gs[1, 2])                     # session legend (marker shapes used in every panel)
+    axL2 = fig.add_subplot(gs[1, 1])                     # session legend (marker shapes used in every panel)
     axL2.axis('off')
-    session_legend(axL2, 'center right', bbox_to_anchor=(1.0, 0.5), handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0,
+    session_legend(axL2, 'center left', bbox_to_anchor=(0.0, 0.5), handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0,
                    fontsize=5.5)
 
     # A: source side, by source area; bracket = frontal vs. non-frontal sources
