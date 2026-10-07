@@ -67,7 +67,7 @@ REGION_OF = {
     'MRN': 'Midbrain', 'RN': 'Midbrain', 'SCm': 'Midbrain', 'SCs': 'Midbrain', 'APN': 'Midbrain', 'PAG': 'Midbrain',
     'SNr': 'Midbrain', 'SNc': 'Midbrain', 'VTA': 'Midbrain', 'IC': 'Midbrain', 'NOT': 'Midbrain', 'MB': 'Midbrain',
 }
-REGION_COLOR = {'Frontal cortex': '#1f6fb2', 'Other neocortex': '#4a4a4a', 'Olfactory cortex': '#8c564b',
+REGION_COLOR = {'Frontal cortex': '#1f6fb2', 'Other neocortex': '#c9262c', 'Olfactory cortex': '#8c564b',
                 'Hippocampal formation': '#2ca02c', 'Striatum / septum': '#9467bd', 'Thalamus': '#e377c2',
                 'Midbrain': '#17becf', 'Unassigned': '#7f7f7f'}
 
