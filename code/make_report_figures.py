@@ -373,7 +373,7 @@ def subspace_decoding_panel(ax, tables, pooled):
     ax.set_xlim(-0.6, len(PAIR_TYPES) - 0.2)
     ax.set_ylabel('context decoding accuracy\n(held-out blocks)')
     ax.axhline(0.5, color='k', ls='--', lw=0.7)
-    ax.set_ylim(0.2, 1.0)
+    ax.set_ylim(0.3, 1.0)
     ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
     ax.set_xlabel('pair type (source → target)')
     # each pair type vs. its block-permutation null: mark next to the tick label
