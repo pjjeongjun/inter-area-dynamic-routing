@@ -103,7 +103,7 @@ def stars(p):
 
 
 def p_text(p):
-    return 'p < 0.001' if p < 0.001 else f'p = {p:.2f}'
+    return 'p < 0.001' if p < 0.001 else (f'p = {p:.3f}' if p < 0.01 else f'p = {p:.2f}')
 
 
 def group_bars_and_bracket(ax, x_fr, x_ot, mean_fr, mean_ot, p, yb):
@@ -167,7 +167,10 @@ def figure_r1(results, out_dir):
     fig = plt.figure(figsize=(W, 6.0))
     gs = fig.add_gridspec(2, 2, height_ratios=[1, 0.9], hspace=0.62, wspace=0.42, left=0.12, right=0.985, top=0.93, bottom=0.1)
     axA, axB = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])
-    axC = fig.add_subplot(gs[1, :])
+    sub = gs[1, :].subgridspec(1, 2, width_ratios=[1, 0.2], wspace=0.04)   # room for the session legend beside C
+    axC = fig.add_subplot(sub[0, 0])
+    axL = fig.add_subplot(sub[0, 1])
+    axL.axis('off')
 
     strip(axA, tables, 'r2_cv_dim', 'cross-validated R²\n(rank-d fit, held-out trials)')
     axA.set_ylim(0, pooled['r2_cv_dim'].max() * 1.15)
@@ -186,7 +189,7 @@ def figure_r1(results, out_dir):
          Line2D([], [], marker='o', mfc='white', mec='0.4', ls='', ms=4, label='Not above null')]
     axC.legend(handles=h, loc='lower left', frameon=False, handletextpad=0.3, labelspacing=0.2, borderaxespad=0.1)
     axC.add_artist(axC.get_legend())
-    session_legend(axC, 'lower right', handletextpad=0.3, labelspacing=0.25, borderaxespad=0.2)
+    session_legend(axL, 'center left', handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0, fontsize=5.5)
 
     place_letters(fig, [axA, axB, axC], 'ABC', dx=-0.075)
     save(fig, out_dir / 'figure_R1_subspace_and_decoding.svg')
@@ -314,7 +317,7 @@ def figure_r2(results, out_dir):
     axC.xaxis.set_major_locator(MultipleLocator(0.05))
     axC.set_ylabel(ylab)
     axC.set_title('Alignment vs. context decoding', loc='left')
-    axC.text(0.03, 0.97, f'ρ = {rho:.2f}, p = {pval:.2f}', transform=axC.transAxes, va='top', fontsize=6.5)
+    axC.text(0.03, 0.97, f'ρ = {rho:.2f}, {p_text(pval)}', transform=axC.transAxes, va='top', fontsize=6.5)
     m.group_legend(axC, loc='lower right', handletextpad=0.3)
 
     axD = fig.add_subplot(gs[1, 1])
