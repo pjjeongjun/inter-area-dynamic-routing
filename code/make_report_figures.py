@@ -149,7 +149,7 @@ def acc_area_panel(ax, areas_tab, order):
         lab.set_color(REGION_COLOR[area_region(a)])
     ax.set_xlim(-0.7, len(order) - 0.3)
     ax.axhline(0.5, color='k', ls='--', lw=0.7)
-    ax.set_ylim(0.3, 0.9)
+    ax.set_ylim(0.2, 1.0)
     ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
     ax.set_xlabel('Area (colour: region)')
     ax.set_ylabel('context decoding accuracy\n(held-out blocks)')
@@ -159,7 +159,7 @@ def acc_area_panel(ax, areas_tab, order):
     p_fr = stats.mannwhitneyu(fr, ot).pvalue
     i_fr = [i for i, a in enumerate(order) if area_group(a) == 'frontal']
     i_ot = [i for i, a in enumerate(order) if area_group(a) != 'frontal']
-    group_bars_and_bracket(ax, i_fr, i_ot, fr.mean(), ot.mean(), p_fr, yb=0.855)
+    group_bars_and_bracket(ax, i_fr, i_ot, fr.mean(), ot.mean(), p_fr, yb=0.9)
     ax.set_title(f'Context axis (LDA): context decoding\nfrontal {fr.mean():.0%} vs. others {ot.mean():.0%} over area instances, {p_text(p_fr)}',
                  loc='left')
     return p_fr
@@ -296,7 +296,7 @@ def figure_r2(results, out_dir):
     gs = fig.add_gridspec(2, 3, width_ratios=[1, 1, 0.45], hspace=0.62, wspace=0.32, left=0.1, right=0.985, top=0.93, bottom=0.11)
     axA = fig.add_subplot(gs[0, 0])
     axB = fig.add_subplot(gs[0, 1], sharey=axA)
-    axC = fig.add_subplot(gs[1, 0], sharey=axA)
+    axC = fig.add_subplot(gs[1, 0:2], sharey=axA)             # full bottom row (panel D was removed)
     axL = fig.add_subplot(gs[0, 2])                      # session legend shared by A and B
     axL.axis('off')
     region_legend(axL, [area_region(a) for a in set(pooled['source']) | set(pooled_t['target'])], loc='center right',
@@ -375,7 +375,7 @@ def subspace_decoding_panel(ax, tables, pooled):
     ax.set_xlim(-0.6, len(PAIR_TYPES) - 0.2)
     ax.set_ylabel('context decoding accuracy\n(held-out blocks)')
     ax.axhline(0.5, color='k', ls='--', lw=0.7)
-    ax.set_ylim(0.2, 0.9)
+    ax.set_ylim(0.2, 1.0)
     ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
     ax.set_xlabel('pair type (source → target)')
     # each pair type vs. its block-permutation null: mark next to the tick label
@@ -389,7 +389,7 @@ def subspace_decoding_panel(ax, tables, pooled):
     fr = pooled['pair_type'].str.startswith('frontal')
     p_fr = stats.mannwhitneyu(pooled['sub_acc_cv'][fr], pooled['sub_acc_cv'][~fr]).pvalue
     m_fr, m_ot = pooled['sub_acc_cv'][fr].mean(), pooled['sub_acc_cv'][~fr].mean()
-    group_bars_and_bracket(ax, [0, 1], [2, 3], m_fr, m_ot, p_fr, yb=0.855)
+    group_bars_and_bracket(ax, [0, 1], [2, 3], m_fr, m_ot, p_fr, yb=0.9)
     ax.set_title(f'Comm. subspace: context decoding\nfrontal→ {m_fr:.0%} vs. others→ {m_ot:.0%}, {p_text(p_fr)}', loc='left')
     h = [Line2D([], [], marker='o', color='0.4', ls='', ms=4, label='Above null'),
          Line2D([], [], marker='o', mfc='white', mec='0.4', ls='', ms=4, label='Not above null')]
