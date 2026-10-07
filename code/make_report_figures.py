@@ -107,7 +107,7 @@ def p_text(p):
     return 'p < 0.001' if p < 0.001 else (f'p = {p:.3f}' if p < 0.01 else f'p = {p:.2f}')
 
 
-OTHERS_BAR = '0.3'   # mean bar over all non-frontal areas (grey: the non-frontal regions have their own colours)
+OTHERS_BAR = GROUP_COLOR['other']   # mean bar over all non-frontal areas: the 'others' orange of the pair-type figures
 
 
 def group_bars_and_bracket(ax, x_fr, x_ot, mean_fr, mean_ot, p, yb, h=0.02):
