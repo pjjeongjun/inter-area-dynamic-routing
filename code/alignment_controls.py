@@ -228,7 +228,7 @@ def main():
     local_root = code_dir.parent / 'data' / 'dynamicrouting_datacube'
     root = Path(os.environ.get('DATACUBE_ROOT', capsule_root if capsule_root.exists() else local_root))
     session_id = os.environ.get('SESSION_ID', '743199_2024-12-05')
-    results = Path(os.environ.get('RESULTS_DIR', code_dir.parent / 'results')) / session_id
+    results = Path(os.environ.get('RESULTS_DIR', code_dir.parent / 'results_3sessions')) / session_id
     results.mkdir(parents=True, exist_ok=True)
     session = pynwb.read_nwb(m.find_nwb(root, session_id))
     out = analyse_controls(session, session.trials[:], session.units[:], session_id)

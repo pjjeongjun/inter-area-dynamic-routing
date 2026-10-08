@@ -47,6 +47,12 @@ Full details are in the module docstring of `code/task_axis_comm_subspace.py`.
     code/tools/nbstrip.py                 git filter that strips notebook outputs (see .gitattributes)
     environment.yml                       conda env mirroring the capsule environment
     environment/, .codeocean/             capsule environment and attached dataset
+    docs/ALIGNMENT_ANALYSIS.md            methods notes and decision log
+    results_3sessions/                    local run of the three downloaded sessions: <session>/, pooled/,
+                                          report/ (figures, figures_png, build_report.js, alignment_report_*.docx)
+    results_11sessions/                   capsule run of all sessions with >= 2 qualifying areas (11 of 12), same layout
+    _archive/                             superseded runs (first pass without regression, earlier null definitions,
+                                          capsule zip); safe to delete
 
 ## Running in the capsule
 
@@ -80,8 +86,14 @@ pooled figures; the other sessions still run.
     git config filter.nbstrip.clean "python code/tools/nbstrip.py"                  # once per clone
     git config filter.nbstrip.smudge cat
 
-    DATACUBE_ROOT="$PWD/data/dynamicrouting_datacube" RESULTS_DIR="$PWD/results" \
-    SESSION_IDS=743199_2024-12-05 python code/run_capsule.py
+    DATACUBE_ROOT="$PWD/data/dynamicrouting_datacube" RESULTS_DIR="$PWD/results_3sessions" \
+    NOTEBOOKS=task_axis_vs_communication_subspace_all_pairs.ipynb SESSION_IDS=743199_2024-12-05 python code/run_capsule.py
 
-`data/` and `results/` are gitignored. The notebooks read `DATACUBE_ROOT`, `SESSION_ID`
+Report figures and the Word report (needs the `docx` node module, e.g. `npm install docx` in a scratch
+directory and `NODE_PATH=<that>/node_modules`):
+
+    cd code && RESULTS_DIR=../results_11sessions ALIGN_QC_DIR=../results_11sessions/report/figures_png python make_report_figures.py
+    cd ../results_11sessions/report && NODE_PATH=... node build_report.js
+
+`data/`, `results_*/` and `_archive/` are gitignored. The notebooks read `DATACUBE_ROOT`, `SESSION_ID`
 and `RESULTS_DIR` from the environment, so the same files run locally and in the capsule.

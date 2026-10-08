@@ -57,7 +57,7 @@ def rank_d_cv_r2_batch(X, Y_batch, alpha, folds, d):
 
 def main(argv):
     code_dir = Path(__file__).resolve().parent
-    results_dir = Path(os.environ.get('RESULTS_DIR', code_dir.parent / 'results'))
+    results_dir = Path(os.environ.get('RESULTS_DIR', code_dir.parent / 'results_3sessions'))
     root = Path(os.environ.get('DATACUBE_ROOT', code_dir.parent / 'data' / 'dynamicrouting_datacube'))
     sessions = argv or sorted(p.parent.name for p in results_dir.glob('*/alignment_results.pkl'))
     for sid in sessions:

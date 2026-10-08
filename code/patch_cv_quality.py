@@ -15,8 +15,11 @@ permutation tests, rebuilding the same preprocessing and unit subsamples as the 
                session and applied to every subsample, and the null is averaged over subsamples draw by draw.
   sub_acc_block_null per pair: the same with labels permuted across whole blocks (block-permutation null, 18 draws);
                `sub_acc_predictive` = accuracy above every block-permutation draw.
+  sub_acc_nc_* per pair: the same three quantities with a nearest-centroid reader instead of the LDA: the per-context
+               means of the d subspace coordinates are taken from the training blocks and a held-out trial is assigned
+               to the nearer mean (Euclidean distance; no covariance estimate, no fitted weights).
 
-    DATACUBE_ROOT=... RESULTS_DIR=../results_regress_full python patch_cv_quality.py [session ...]
+    DATACUBE_ROOT=... RESULTS_DIR=../results_3sessions python patch_cv_quality.py [session ...]
 """
 import os, pickle, sys, time
 from pathlib import Path
@@ -47,12 +50,20 @@ def subspace_projections(X, Y, alpha, d, folds):
     return out
 
 
-def cv_accuracy_from(proj, labels):
-    """LDA (equal priors) on the subspace coordinates, pooled over held-out trials."""
+def cv_accuracy_from(proj, labels, decoder='lda'):
+    """Context decoding on the subspace coordinates, pooled over held-out trials. decoder='lda': LDA with equal
+    priors; 'nc': nearest centroid (held-out trial -> the nearer of the two training-block context means)."""
     correct = total = 0
     for tr, te, Ztr, Zte in proj:
-        lda = LinearDiscriminantAnalysis(solver='svd', priors=[0.5, 0.5]).fit(Ztr, labels[tr])
-        correct += (lda.predict(Zte) == labels[te]).sum()
+        if decoder == 'lda':
+            lda = LinearDiscriminantAnalysis(solver='svd', priors=[0.5, 0.5]).fit(Ztr, labels[tr])
+            pred = lda.predict(Zte)
+        else:
+            classes = np.unique(labels[tr])
+            mu = np.stack([Ztr[labels[tr] == c].mean(axis=0) for c in classes])          # (2, d)
+            dist = ((Zte[:, None, :] - mu[None, :, :]) ** 2).sum(axis=2)                 # (n_te, 2)
+            pred = classes[dist.argmin(axis=1)]
+        correct += (pred == labels[te]).sum()
         total += len(te)
     return correct / total
 
@@ -80,6 +91,7 @@ def patch(session_dir: Path, root: Path):
     sub_acc = np.empty((K, P))
     sub_acc_null = np.empty((K, P, m.N_ACC_PERMUTATIONS))
     sub_acc_block = np.empty((K, P, n_block))
+    nc_acc, nc_null, nc_block = np.empty((K, P)), np.empty((K, P, m.N_ACC_PERMUTATIONS)), np.empty((K, P, n_block))
     for k in range(K):
         tk = time.time()
         rng = npr.default_rng(k)
@@ -95,10 +107,14 @@ def patch(session_dir: Path, root: Path):
             alpha, d = m.select_alpha(X, Y), int(res['dims'][k, p])
             proj = subspace_projections(X, Y, alpha, d, folds_ctx)
             sub_acc[k, p] = cv_accuracy_from(proj, context)
+            nc_acc[k, p] = cv_accuracy_from(proj, context, 'nc')
             for j in range(m.N_ACC_PERMUTATIONS):
                 sub_acc_null[k, p, j] = cv_accuracy_from(proj, label_perms[j])
+                nc_null[k, p, j] = cv_accuracy_from(proj, label_perms[j], 'nc')
             for j in range(n_block):     # the block-permuted labels define their own balanced folds
-                sub_acc_block[k, p, j] = cv_accuracy_from(subspace_projections(X, Y, alpha, d, block_folds[j]), block_perms[j])
+                proj_b = subspace_projections(X, Y, alpha, d, block_folds[j])
+                sub_acc_block[k, p, j] = cv_accuracy_from(proj_b, block_perms[j])
+                nc_block[k, p, j] = cv_accuracy_from(proj_b, block_perms[j], 'nc')
         print(f'{sid}: subsample {k + 1}/{K} in {time.time() - tk:.0f} s', flush=True)
     null_m, block_m = sub_acc_null.mean(axis=0), sub_acc_block.mean(axis=0)      # draw-wise over subsamples
     res['task_r2_cv'], res['sub_acc_cv'] = task_r2_cv, sub_acc
@@ -114,20 +130,32 @@ def patch(session_dir: Path, root: Path):
     pt['sub_acc_block_null_lo'], pt['sub_acc_block_null_hi'] = block_m.min(axis=1), block_m.max(axis=1)
     pt['sub_acc_block_p'] = [m.p_one_sided(block_m[p], obs[p]) for p in range(P)]
     pt['sub_acc_predictive'] = obs > pt['sub_acc_block_null_hi'].values
+    # nearest-centroid reader
+    nc_null_m, nc_block_m = nc_null.mean(axis=0), nc_block.mean(axis=0)
+    res['sub_acc_nc_cv'], res['sub_acc_nc_null_mean'], res['sub_acc_nc_block_null_mean'] = nc_acc, nc_null_m, nc_block_m
+    obs_nc = nc_acc.mean(0)
+    pt['sub_acc_nc_cv'], pt['sub_acc_nc_cv_sd'] = obs_nc, nc_acc.std(0, ddof=1)
+    pt['sub_acc_nc_null_mean'] = nc_null_m.mean(axis=1)
+    pt['sub_acc_nc_p'] = [m.p_one_sided(nc_null_m[p], obs_nc[p]) for p in range(P)]
+    pt['sub_acc_nc_block_null_mean'] = nc_block_m.mean(axis=1)
+    pt['sub_acc_nc_block_null_lo'], pt['sub_acc_nc_block_null_hi'] = nc_block_m.min(axis=1), nc_block_m.max(axis=1)
+    pt['sub_acc_nc_block_p'] = [m.p_one_sided(nc_block_m[p], obs_nc[p]) for p in range(P)]
+    pt['sub_acc_nc_predictive'] = obs_nc > pt['sub_acc_nc_block_null_hi'].values
     with open(session_dir / 'alignment_results.pkl', 'wb') as f:
         pickle.dump(res, f)
     at.to_csv(session_dir / 'task_axis_by_area.csv', index=False)
     pt.to_csv(session_dir / 'alignment_by_pair.csv', index=False)
     n_up = int(pt['sub_acc_predictive'].sum())
     print(f'{session_dir.parent.name}/{sid}: task CV R² {task_r2_cv.mean():.3f} (min {task_r2_cv.mean(0).min():.3f}), '
-          f'subspace accuracy {sub_acc.mean():.3f}, {n_up}/{P} pairs above the block-permutation null; '
+          f'subspace accuracy LDA {sub_acc.mean():.3f} ({n_up}/{P} above the block null), '
+          f'nearest-centroid {nc_acc.mean():.3f} ({int(pt["sub_acc_nc_predictive"].sum())}/{P}); '
           f'{(time.time() - t0) / 60:.1f} min', flush=True)
 
 
 if __name__ == '__main__':
     code_dir = Path(__file__).resolve().parent
     root = Path(os.environ.get('DATACUBE_ROOT', code_dir.parent / 'data' / 'dynamicrouting_datacube'))
-    results_dir = Path(os.environ.get('RESULTS_DIR', code_dir.parent / 'results'))
+    results_dir = Path(os.environ.get('RESULTS_DIR', code_dir.parent / 'results_3sessions'))
     sessions = sys.argv[1:] or sorted(p.parent.name for p in results_dir.glob('*/alignment_results.pkl'))
     for sid in sessions:
         patch(results_dir / sid, root)

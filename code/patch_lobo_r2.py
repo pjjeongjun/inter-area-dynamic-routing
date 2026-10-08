@@ -8,7 +8,7 @@ rebuilding the same preprocessing and unit subsamples as the stored run:
                      draws). The permutations are generated once per session and applied to every subsample; the
                      null is averaged over subsamples draw by draw.
 
-    RESULTS_DIR=../results_regress_full python patch_lobo_r2.py [session ...]
+    RESULTS_DIR=../results_3sessions python patch_lobo_r2.py [session ...]
 """
 import os, pickle, sys, time
 from pathlib import Path
@@ -82,7 +82,7 @@ def patch(session_dir: Path, root: Path):
 if __name__ == '__main__':
     code_dir = Path(__file__).resolve().parent
     root = Path(os.environ.get('DATACUBE_ROOT', code_dir.parent / 'data' / 'dynamicrouting_datacube'))
-    results_dir = Path(os.environ.get('RESULTS_DIR', code_dir.parent / 'results'))
+    results_dir = Path(os.environ.get('RESULTS_DIR', code_dir.parent / 'results_3sessions'))
     sessions = sys.argv[1:] or sorted(p.parent.name for p in results_dir.glob('*/alignment_results.pkl'))
     for sid in sessions:
         patch(results_dir / sid, root)

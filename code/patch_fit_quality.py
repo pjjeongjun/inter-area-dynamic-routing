@@ -3,7 +3,7 @@ the permutation tests: task-axis R² per area (variance of the projection explai
 and the in-sample / cross-validated R² of the rank-d communication subspace per pair. Rebuilds
 the same preprocessing, unit subsamples and folds as the stored run.
 
-    DATACUBE_ROOT=... RESULTS_DIR=../results_regress_full python patch_fit_quality.py [session ...]
+    DATACUBE_ROOT=... RESULTS_DIR=../results_3sessions python patch_fit_quality.py [session ...]
 """
 import os, pickle, sys
 from pathlib import Path
@@ -56,7 +56,7 @@ def patch(session_dir: Path, root: Path):
 if __name__ == '__main__':
     code_dir = Path(__file__).resolve().parent
     root = Path(os.environ.get('DATACUBE_ROOT', code_dir.parent / 'data' / 'dynamicrouting_datacube'))
-    results_dir = Path(os.environ.get('RESULTS_DIR', code_dir.parent / 'results'))
+    results_dir = Path(os.environ.get('RESULTS_DIR', code_dir.parent / 'results_3sessions'))
     sessions = sys.argv[1:] or sorted(p.parent.name for p in results_dir.glob('*/alignment_results.pkl'))
     for sid in sessions:
         patch(results_dir / sid, root)

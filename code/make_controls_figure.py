@@ -21,7 +21,7 @@ from matplotlib.lines import Line2D
 from scipy import stats
 
 from make_alignment_figures import (FDR_ALPHA, GROUP_COLOR, MARKERS, PAIR_COLOR, PAIR_LABEL, PAIR_TYPES, area_group,
-                                    area_order, group_legend, place_letters, save, session_legend,
+                                    area_order, group_legend, place_letters, save, session_legend, POINT_EDGE, soft,
                                     strip_by_type_sessions)
 
 
@@ -52,8 +52,8 @@ def figure_controls(results, out_dir: Path):
             jitter = rng.uniform(-0.08, 0.08)
             y = [r[c] for c in cols]
             axA.plot(np.arange(4) + jitter, y, color=PAIR_COLOR[r['pair_type']], lw=0.5, alpha=0.5)
-            axA.scatter(np.arange(4) + jitter, y, s=10, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[r['pair_type']],
-                        edgecolor='k', linewidth=0.2, zorder=3)
+            axA.scatter(np.arange(4) + jitter, y, s=10, marker=MARKERS[k % len(MARKERS)], color=soft(PAIR_COLOR[r['pair_type']]),
+                        edgecolor=PAIR_COLOR[r['pair_type']], linewidth=POINT_EDGE, zorder=3)
     means = [pooled[c].mean() for c in cols]
     axA.plot(np.arange(4) + 0.25, means, 'k_', ms=12, mew=1.6, zorder=4)
     axA.set_xticks(range(4))
@@ -71,7 +71,7 @@ def figure_controls(results, out_dir: Path):
         for typ in PAIR_TYPES:
             sub = t[t['pair_type'] == typ]
             axB.scatter(sub['cos_same'] - sub['cos_cross_null'], sub['cos_cross'] - sub['cos_cross_null'], s=18,
-                        marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[typ], edgecolor='k', linewidth=0.3)
+                        marker=MARKERS[k % len(MARKERS)], color=soft(PAIR_COLOR[typ]), edgecolor=PAIR_COLOR[typ], linewidth=POINT_EDGE)
     lim = max(0.7, (pooled['cos_same'] - pooled['cos_cross_null']).max() + 0.05)
     axB.plot([0, lim], [0, lim], 'k--', lw=0.7)
     axB.axhline(0, color='k', ls=':', lw=0.7)
@@ -99,7 +99,7 @@ def figure_controls(results, out_dir: Path):
 
 def main(argv):
     code_dir = Path(__file__).resolve().parent
-    results_dir = Path(os.environ.get('RESULTS_DIR', code_dir.parent / 'results'))
+    results_dir = Path(os.environ.get('RESULTS_DIR', code_dir.parent / 'results_3sessions'))
     sessions = argv or sorted(p.parent.name for p in results_dir.glob('*/controls_results.pkl'))
     results = []
     for sid in sessions:

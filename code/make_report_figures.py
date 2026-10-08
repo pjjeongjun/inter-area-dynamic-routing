@@ -9,7 +9,8 @@ Sessions are every ``<session>/alignment_results.pkl`` found under RESULTS_DIR (
 local sessions, or all sessions of a capsule run). ``REPORT_DIR`` overrides the output folder.
 Panel R2-D needs ``RESULTS_DIR/pooled/controls_by_pair_pooled.csv`` (make_controls_figure.py).
 
-Figure R1  communication subspace (cross-validated R², context decoding) and per-area context decoding (default run)
+Figure R1  communication subspace (cross-validated R², context decoding), per-area context decoding, and subspace minus
+           source-area decoding (default run)
 Figure S1  communication-subspace dimensionality (supplementary)
 Figure R2  alignment by area (source, target), vs. context decoding, and the cross-block control (default run)
 """
@@ -44,6 +45,7 @@ SESSIONS = sorted(p.parent.name for p in RESULTS_DIR.glob('*/alignment_results.p
 SHORT = {'frontal->frontal': 'Frontal\n→ Frontal', 'frontal->other': 'Frontal\n→ Others', 'other->frontal': 'Others\n→ Frontal',
          'other->other': 'Others\n→ Others'}
 W = 6.5
+READER = os.environ.get('SUBSPACE_READER', 'sub_acc_nc')   # subspace reader for Figure 1B/1D: 'sub_acc_nc' = nearest centroid, 'sub_acc' = LDA
 
 
 def load_results(d=None):
@@ -182,17 +184,18 @@ def acc_area_panel(ax, areas_tab, order):
 def figure_r1(results, out_dir, color_by='target'):
     """color_by: 'target' (default) or 'source' -- which area of the pair colours the points in A and B."""
     """Communication subspace: cross-validated R² per pair (A) and context decoded from it per pair (B); context axis
-    (LDA): context decoding accuracy per area instance (C)."""
+    (LDA): context decoding accuracy per area instance (C); subspace minus source-area decoding per pair (D)."""
     tables = [qualify(r) for r in results]
     pooled = pd.concat(tables, ignore_index=True)
     areas_tab = pd.concat([r['area_table'] for r in results], ignore_index=True)
 
-    fig = plt.figure(figsize=(W, 6.0))
-    gs = fig.add_gridspec(2, 2, height_ratios=[1, 0.9], hspace=0.62, wspace=0.42, left=0.12, right=0.985, top=0.93, bottom=0.1)
+    fig = plt.figure(figsize=(W, 8.4))
+    gs = fig.add_gridspec(3, 2, height_ratios=[1, 0.9, 0.9], hspace=0.72, wspace=0.42, left=0.12, right=0.985, top=0.95,
+                          bottom=0.06)
     axA, axB = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])
-    sub = gs[1, :].subgridspec(1, 2, width_ratios=[1, 0.6], wspace=0.04)   # room for the region and session legends beside C
-    axC = fig.add_subplot(sub[0, 0])
-    axL = fig.add_subplot(sub[0, 1])
+    axC = fig.add_subplot(gs[1, :])
+    axD = fig.add_subplot(gs[2, 0])
+    axL = fig.add_subplot(gs[2, 1])                     # region, session and null legends (shared by every panel)
     axL.axis('off')
 
     strip(axA, tables, 'r2_cv_dim', 'cross-validated R²\n(rank-d fit, held-out trials)', color_by=color_by)
@@ -205,7 +208,7 @@ def figure_r1(results, out_dir, color_by='target'):
     n_sig = int(pooled['r2_significant'].sum())
     axA.set_title(f'Comm. subspace: cross-validated R²\n{n_sig}/{len(pooled)} pairs > trial-shuffle null', loc='left')
 
-    subspace_decoding_panel(axB, tables, pooled, color_by=color_by)
+    subspace_decoding_panel(axB, tables, pooled, color_by=color_by, prefix=READER)
 
     acc_area_panel(axC, areas_tab, area_order(areas_tab['area'].unique()))
     h = [Line2D([], [], marker='o', color='0.4', ls='', ms=4, label='Above null'),
@@ -218,7 +221,9 @@ def figure_r1(results, out_dir, color_by='target'):
     session_legend(axL, 'upper right', bbox_to_anchor=(1.0, 1.0), handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0,
                    fontsize=5.5)
 
-    place_letters(fig, [axA, axB, axC], 'ABC', dx=-0.075)
+    transmitted_context_panel(axD, pooled)
+
+    place_letters(fig, [axA, axB, axC, axD], 'ABCD', dx=-0.075)
     save(fig, out_dir / ('figure_R1_subspace_and_decoding.svg' if color_by == 'target' else f'figure_R1_subspace_and_decoding_by_{color_by}.svg'))
 
 
@@ -257,70 +262,32 @@ def subspace_vs_axis_panel(ax, tables, pooled):
     return rho, diff
 
 
-def figure_rs2(results, out_dir):
-    """Supplementary Figure 2: does the communication subspace carry more context than its source population has?
-    A: context decoded from the subspace against context decoded from the source population, all pairs, with a
-    least-squares line per source group. B: the difference (subspace − source), pairs with a predictive source only."""
-    tables = [qualify(r) for r in results]
-    pooled = pd.concat(tables, ignore_index=True)
-    pooled['frontal_src'] = pooled['pair_type'].str.startswith('frontal')
-    groups = ((True, GROUP_COLOR['frontal'], 'Frontal source'), (False, GROUP_COLOR['other'], 'Non-frontal source'))
-
-    fig = plt.figure(figsize=(W, 3.3))
-    gs = fig.add_gridspec(1, 2, width_ratios=[1.15, 1], wspace=0.4, left=0.1, right=0.985, top=0.86, bottom=0.17)
-    axA, axB = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])
-
-    # A: subspace decoding vs. source-population decoding, every pair
-    for k, sid in enumerate(SESSIONS):
-        for fr, col, _ in groups:
-            g = pooled[(pooled['session'] == sid) & (pooled['frontal_src'] == fr)]
-            axA.scatter(g['source_acc_cv'], g['sub_acc_cv'], s=14, marker=MARKERS[k % len(MARKERS)], color=col, edgecolor='k',
-                        linewidth=0.3, zorder=3)
-    lo = min(pooled['source_acc_cv'].min(), pooled['sub_acc_cv'].min()) - 0.02
-    hi = max(pooled['source_acc_cv'].max(), pooled['sub_acc_cv'].max()) + 0.02
-    axA.plot([lo, hi], [lo, hi], color='0.5', ls=':', lw=0.8, zorder=1)
-    fits = {}
-    for fr, col, _ in groups:
-        g = pooled[pooled['frontal_src'] == fr]
-        fits[fr] = stats.linregress(g['source_acc_cv'], g['sub_acc_cv'])
-        xs = np.array([g['source_acc_cv'].min(), g['source_acc_cv'].max()])
-        axA.plot(xs, fits[fr].intercept + fits[fr].slope * xs, color=col, lw=1.5, zorder=4)
-    f_all = stats.linregress(pooled['source_acc_cv'], pooled['sub_acc_cv'])
-    axA.set_xlim(lo, hi)
-    axA.set_ylim(lo, hi)
-    axA.set_aspect('equal')
-    axA.xaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
-    axA.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
-    axA.set_xlabel('Decoding, source population')
-    axA.set_ylabel('Decoding, comm. subspace')
-    axA.set_title(f'Subspace vs. source population\nslope {f_all.slope:.2f} (frontal {fits[True].slope:.2f}, others {fits[False].slope:.2f})', loc='left')
-    h = [Line2D([], [], marker='s', ls='', color=col, label=lab) for _, col, lab in groups] + \
-        [Line2D([], [], color='0.5', ls=':', label='Identity')]
-    axA.legend(handles=h, loc='upper left', frameon=False, handletextpad=0.3, labelspacing=0.25, borderaxespad=0.2)
-
-    # B: transmitted context (subspace − source population), pairs with a predictive source
+def transmitted_context_panel(ax, pooled):
+    """Does the communication subspace carry more context than its source area has? Per pair with a predictive source:
+    context decoding accuracy from the communication subspace minus that of the source area's LDA context axis (both
+    held-out blocks), frontal vs. non-frontal sources (Mann–Whitney over pairs); black = mean ± SEM."""
     q = pooled[pooled['source_axis_predictive']].copy()
-    q['d'] = q['sub_acc_cv'] - q['source_acc_cv']
+    q['frontal_src'] = q['pair_type'].str.startswith('frontal')
+    q['d'] = q[f'{READER}_cv'] - q['source_acc_cv']
     rng = np.random.default_rng(0)
-    for i, (fr, col, _) in enumerate(groups):
+    for i, (fr, col) in enumerate(((True, GROUP_COLOR['frontal']), (False, GROUP_COLOR['other']))):
         for k, sid in enumerate(SESSIONS):
             g = q[(q['session'] == sid) & (q['frontal_src'] == fr)]
-            axB.scatter(i + rng.uniform(-0.22, 0.22, len(g)), g['d'], s=14, marker=MARKERS[k % len(MARKERS)], color=col,
-                        edgecolor='k', linewidth=0.3, zorder=3)
+            ax.scatter(i + rng.uniform(-0.22, 0.22, len(g)), g['d'], s=14, marker=MARKERS[k % len(MARKERS)], color=soft(col),
+                       edgecolor=col, linewidth=POINT_EDGE, zorder=3)
         v = q.loc[q['frontal_src'] == fr, 'd']
-        axB.errorbar(i + 0.36, v.mean(), yerr=v.std(ddof=1) / np.sqrt(len(v)), fmt='_', color='k', ms=9, mew=1.4, capsize=0, zorder=4)
+        ax.errorbar(i + 0.36, v.mean(), yerr=v.std(ddof=1) / np.sqrt(len(v)), fmt='_', color='k', ms=9, mew=1.4, capsize=0, zorder=4)
     d_fr, d_ot = q.loc[q['frontal_src'], 'd'], q.loc[~q['frontal_src'], 'd']
     p_tr = stats.mannwhitneyu(d_fr, d_ot).pvalue
-    axB.axhline(0, color='k', ls='--', lw=0.7)
-    axB.set_xticks([0, 1])
-    axB.set_xticklabels(['Frontal\nsource', 'Non-frontal\nsource'])
-    axB.set_xlim(-0.6, 1.7)
-    axB.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
-    axB.set_ylabel('Subspace − source population')
-    axB.set_title(f'Transmitted context\n{d_fr.mean():+.1%} vs. {d_ot.mean():+.1%}, {p_text(p_tr)}', loc='left')
-
-    place_letters(fig, [axA, axB], 'AB', dx=-0.075)
-    save(fig, out_dir / 'figure_S2_transmission.svg')
+    ax.axhline(0, color='k', ls='--', lw=0.7)
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(['Frontal\nsource', 'Non-frontal\nsource'])
+    ax.set_xlim(-0.6, 1.7)
+    ax.yaxis.set_major_locator(MultipleLocator(0.02))
+    ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
+    ax.set_ylabel('Context decoding accuracy:\ncomm. subspace − source area')
+    ax.set_title(f'Transmitted context (predictive sources)\n{d_fr.mean():+.1%} vs. {d_ot.mean():+.1%}, {p_text(p_tr)}', loc='left')
+    return p_tr
 
 def figure_rs1(results, out_dir):
     """Supplementary Figure 1: how the communication-subspace dimensionality is chosen. Colour = region / frontal
@@ -469,24 +436,24 @@ def figure_r2(results, out_dir, color_by='target'):
 
 
 # ----------------------------------------------------------------------------- R1, panel B
-def subspace_decoding_panel(ax, tables, pooled, color_by='target'):
-    """Context decoded from the communication subspace (held-out blocks), by pair type; filled = the pair's decoding accuracy
+def subspace_decoding_panel(ax, tables, pooled, color_by='target', prefix='sub_acc'):
+    """Context decoded from the communication subspace (prefix selects the reader: sub_acc = LDA, sub_acc_nc = nearest centroid) (held-out blocks), by pair type; filled = the pair's decoding accuracy
     is above every draw of its block-permutation null, open = not. Grey box: the pair type's block-permutation null (mean
     over pairs of the null's min and max). Coloured bars: mean over all pairs with a
     frontal / non-frontal source; bracket: frontal → vs. other → sources (Mann–Whitney over pairs). Asterisks under the
     x-axis labels: each pair type vs. its block-permutation null (Wilcoxon on accuracy − null mean)."""
     for i, typ in enumerate(PAIR_TYPES):
         sub_all = pooled[pooled['pair_type'] == typ]
-        ax.fill_between([i - 0.45, i + 0.45], sub_all['sub_acc_block_null_lo'].mean(), sub_all['sub_acc_block_null_hi'].mean(),
+        ax.fill_between([i - 0.45, i + 0.45], sub_all[f'{prefix}_block_null_lo'].mean(), sub_all[f'{prefix}_block_null_hi'].mean(),
                         color='0.88', lw=0, zorder=0)
         # one swarm per pair type (all sessions together, so points of different sessions do not overlap either)
         parts = [(k, t[t['pair_type'] == typ]) for k, t in enumerate(tables)]
-        yall = np.concatenate([sub['sub_acc_cv'].values for _, sub in parts])
+        yall = np.concatenate([sub[f'{prefix}_cv'].values for _, sub in parts])
         xall = swarm_x(yall, i, dy=0.022, dx=0.08, half_width=0.42)
         pos = 0
         for k, sub in parts:
             n = len(sub)
-            x, yv, q = xall[pos:pos + n], yall[pos:pos + n], sub['sub_acc_predictive'].values.astype(bool)
+            x, yv, q = xall[pos:pos + n], yall[pos:pos + n], sub[f'{prefix}_predictive'].values.astype(bool)
             pos += n
             ax.scatter(x[q], yv[q], s=14, marker=MARKERS[k % len(MARKERS)], c=[point_color(t_) for t_ in sub[color_by].values[q]], edgecolor=[area_color(t_) for t_ in sub[color_by].values[q]], linewidth=POINT_EDGE, zorder=3)
             ax.scatter(x[~q], yv[~q], s=14, marker=MARKERS[k % len(MARKERS)], color='white', edgecolor=[area_color(t_) for t_ in sub[color_by].values[~q]], linewidth=POINT_EDGE,
@@ -500,16 +467,16 @@ def subspace_decoding_panel(ax, tables, pooled, color_by='target'):
     ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
     ax.set_xlabel('source → target')
     # each pair type vs. its block-permutation null: mark next to the tick label
-    y_mark = pooled['sub_acc_cv'].max() + 0.012          # one common height so the marks do not encode a value
+    y_mark = pooled[f'{prefix}_cv'].max() + 0.012          # one common height so the marks do not encode a value
     for i, typ in enumerate(PAIR_TYPES):                 # each pair type vs. its block-permutation null
         sub = pooled[pooled['pair_type'] == typ]
-        p_typ = stats.wilcoxon(sub['sub_acc_cv'] - sub['sub_acc_block_null_mean']).pvalue
+        p_typ = stats.wilcoxon(sub[f'{prefix}_cv'] - sub[f'{prefix}_block_null_mean']).pvalue
         ax.text(i, y_mark, stars(p_typ), ha='center', va='bottom', fontsize=8 if p_typ < 0.05 else 6.5)
     ax.set_xticklabels([SHORT[typ] for typ in PAIR_TYPES])
     # group means and the frontal → vs. other → comparison over pairs
     fr = pooled['pair_type'].str.startswith('frontal')
-    p_fr = stats.mannwhitneyu(pooled['sub_acc_cv'][fr], pooled['sub_acc_cv'][~fr]).pvalue
-    m_fr, m_ot = pooled['sub_acc_cv'][fr].mean(), pooled['sub_acc_cv'][~fr].mean()
+    p_fr = stats.mannwhitneyu(pooled[f'{prefix}_cv'][fr], pooled[f'{prefix}_cv'][~fr]).pvalue
+    m_fr, m_ot = pooled[f'{prefix}_cv'][fr].mean(), pooled[f'{prefix}_cv'][~fr].mean()
     group_bars_and_bracket(ax, [0, 1], [2, 3], m_fr, m_ot, p_fr, yb=0.945, h=0.015)
     ax.set_title(f'Comm. subspace: context decoding\nfrontal→ {m_fr:.0%} vs. others→ {m_ot:.0%}, {p_text(p_fr)}', loc='left')
     h = [Line2D([], [], marker='o', color='0.4', ls='', ms=4, label='Above null'),
@@ -561,7 +528,6 @@ def main(argv):
     full = load_results()
     figure_r1(full, out_dir)
     figure_rs1(full, out_dir)
-    figure_rs2(full, out_dir)
     figure_r2(full, out_dir)
     print(f'report figures written to {out_dir}')
 
