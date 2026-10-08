@@ -85,7 +85,7 @@ def scatter_types(ax, tables, xcol, ycol, s=14):
 
 # ----------------------------------------------------------------------------- R1
 ACC_YLIM = (0.1, 0.9)   # shared by every decoding-accuracy panel
-SWARM_S = 10            # marker size (pt²) of the per-pair swarms in Figure 1A-B: small enough that 82 pairs fit one column
+SWARM_S = 10            # marker size (pt²) of the per-pair points in Figure 1A-B
 
 
 _U = np.column_stack([np.cos(np.linspace(0, 2 * np.pi, 180, endpoint=False)),
@@ -94,7 +94,7 @@ _U = np.column_stack([np.cos(np.linspace(0, 2 * np.pi, 180, endpoint=False)),
 
 def marker_support(marker, size_pt, dpi, edge_pt=POINT_EDGE):
     """Support function (px, over the directions _U) of a marker's outer outline: its exact shape at size size_pt (sqrt(s)
-    for scatter, ms for plot) plus half its edge line. Two markers are apart when marker_gap() > 0."""
+    for scatter, ms for plot) plus half its edge line."""
     if marker == 'o':
         h = np.full(len(_U), size_pt / 2)
     else:
@@ -104,98 +104,44 @@ def marker_support(marker, size_pt, dpi, edge_pt=POINT_EDGE):
     return (h + edge_pt / 2) * dpi / 72
 
 
-def marker_gap(h_a, h_b, delta):
-    """Distance (px; negative = overlap) between the outlines of markers a and b whose centres differ by delta (b − a, px,
-    shape (n, 2) for n markers b), from the support functions of marker_support (separating-axis bound)."""
-    return ((np.atleast_2d(delta) @ _U.T) - h_a - np.roll(h_b, -len(_U) // 2, axis=-1)).max(axis=1)
+def colour_group(area):
+    """Legend entry that sets an area's colour: frontal subgroup, otherwise region."""
+    return m.FRONTAL_SUBGROUP.get(area, 'Frontal: MOs') if area_group(area) == 'frontal' else area_region(area)
 
 
-def beeswarm_x(ax, y, center, markers, s=14, half_width=0.42, gap_pt=0.5):
-    """x positions (data units) around ``center`` for scatter markers (codes ``markers``, size ``s`` pt²) at heights ``y``,
-    so that no two markers come closer than gap_pt, measured between their exact outlines including the edge line:
-    points are placed one at a time, in order of height, at the free slot nearest the centre (screen distances, so log
-    axes work too). Needs the final figure size, axis limits and scale. A point with no free slot within ±half_width
-    goes where it overlaps least."""
-    y = np.asarray(y, dtype=float)
-    out = np.full(len(y), float(center))
-    if not len(y):
-        return out
-    dpi, tr, y_ref = ax.figure.dpi, ax.transData, ax.get_ylim()[0]
-    sup = {m_: marker_support(m_, np.sqrt(s), dpi) for m_ in set(markers)}
-    gap, reach = gap_pt * dpi / 72, 2 * max(h.max() for h in sup.values()) + gap_pt * dpi / 72
-    upx = tr.transform((center + 1, y_ref))[0] - tr.transform((center, y_ref))[0]
-    ypx = tr.transform(np.column_stack([np.full(len(y), float(center)), y]))[:, 1]
-    hw, step = half_width * upx, reach / 12
-    px, py, pm = [], [], []                                   # placed offsets, heights, marker codes
-    for i in np.argsort(ypx):
-        near = [j for j in range(len(py)) if abs(py[j] - ypx[i]) < reach]
-        best, best_gap, k = 0.0, -np.inf, 0
-        while True:
-            off = (k + 1) // 2 * step * (1 if k % 2 else -1)
-            if abs(off) > hw:
-                break
-            g = min((marker_gap(sup[markers[i]], sup[pm[j]], (px[j] - off, py[j] - ypx[i]))[0] for j in near), default=np.inf)
-            if g >= gap:
-                best = off
-                break
-            if g > best_gap:
-                best, best_gap = off, g
-            k += 1
-        px.append(best), py.append(ypx[i]), pm.append(markers[i])
-        out[i] = center + best / upx
-    return out
+COLOUR_GROUP_ORDER = m.SUBGROUP_ORDER + m.REGION_ORDER + ['Unassigned']
 
 
-def swarm_columns(ax, ys, mks, labels, s=None, gap_pt=4.0, label_gap_pt=3.0, pad_pt=3.0):
-    """Beeswarm columns that never overlap, for a categorical x axis. Each column i (heights ys[i], marker codes mks[i])
-    gets the width its swarm needs, measured on screen with exact marker outlines; neighbouring swarms keep gap_pt
-    between them and neighbouring two-line tick labels (labels[i]) keep label_gap_pt; the remaining width is spread
-    evenly. Sets x limits to (0, axis width in pt), so data x is in points. Needs the final y limits and scale. Returns
-    (centres, half-extents of the swarms, x positions per column, fits)."""
-    from matplotlib.font_manager import FontProperties
-    s = SWARM_S if s is None else s
-    fig = ax.figure
-    r = fig.canvas.get_renderer()
-    W = ax.get_window_extent(r).width * 72 / fig.dpi
-    ax.set_xlim(0, W)
-    rel = [beeswarm_x(ax, y, 0.0, mk, s=s, half_width=W) for y, mk in zip(ys, mks)]   # offsets in pt (centre 0)
-    ext = [float(np.abs(x).max()) + np.sqrt(s) / 2 + POINT_EDGE if len(x) else 0.0 for x in rel]  # outer reach, pt
-    fp = FontProperties(size=plt.rcParams['xtick.labelsize'])
-    lab = [max(r.get_text_width_height_descent(line, fp, ismath=False)[0] for line in l.split('\n')) * 72 / fig.dpi
-           for l in labels]
-    n = len(ys)
-    ends = [max(ext[0], lab[0] / 2) + pad_pt, max(ext[-1], lab[-1] / 2) + pad_pt]
-    steps = [max(ext[i] + ext[i + 1] + gap_pt, (lab[i] + lab[i + 1]) / 2 + label_gap_pt) for i in range(n - 1)]
-    need = sum(ends) + sum(steps)
-    slack = max(W - need, 0.0) / (n + 1)
-    c = ends[0] + slack + np.concatenate([[0.0], np.cumsum(np.array(steps) + slack)])
-    return c, np.array(ext), [ci + xi for ci, xi in zip(c, rel)], need <= W
+def colour_group_x(areas, centre):
+    """x per colour group present among areas, evenly spaced around centre in legend order."""
+    present = set(map(colour_group, areas))
+    groups = [g for g in COLOUR_GROUP_ORDER if g in present]
+    step = min(0.12, 0.7 / max(len(groups), 1))
+    return dict(zip(groups, centre + (np.arange(len(groups)) - (len(groups) - 1) / 2) * step))
 
 
 def r2_swarm_panel(ax, tables, ycol, ylabel, color_by='target', s=SWARM_S):
-    """Strip plot by pair type with one marker shape per session, as make_alignment_figures.strip_by_type_sessions, but
-    on a linear axis with beeswarm columns laid out so that no markers overlap (swarm_columns); dark bar = mean over the pairs
-    of a type. Returns the column centres (data x, pt)."""
+    """Strip plot by pair type with one marker shape per session, as make_alignment_figures.strip_by_type_sessions, on a
+    linear axis. Within a pair type, each colour group of the color_by area (frontal subgroup or region) has its own x,
+    shared by all its pairs, in legend order (JeongJun, 2026-10-08); dark bar = mean over the pairs of a type. Returns the
+    column centres (data x)."""
     pooled = pd.concat(tables, ignore_index=True)
     ax.set_ylim(0, pooled[ycol].max() * 1.18)            # linear axis (JeongJun, 2026-10-08: no log scale here)
+    ax.set_xlim(-0.5, len(PAIR_TYPES) - 0.5)
     ax.axhline(0, color='k', ls='--', lw=0.7)
-    cols = [[(k, tab[tab['pair_type'] == t]) for k, tab in enumerate(tables)] for t in PAIR_TYPES]
-    ys = [np.concatenate([sub[ycol].values for _, sub in parts]) for parts in cols]
-    mks = [[MARKERS[k % len(MARKERS)] for k, sub in parts for _ in range(len(sub))] for parts in cols]
-    centres, ext, xs, _ = swarm_columns(ax, ys, mks, [SHORT[t] for t in PAIR_TYPES], s=s)
+    centres = np.arange(len(PAIR_TYPES), dtype=float)
     for i, t in enumerate(PAIR_TYPES):
-        parts, xall = cols[i], xs[i]
-        pos = 0
-        for k, sub in parts:
-            n = len(sub)
-            if n:
-                ax.scatter(xall[pos:pos + n], sub[ycol], s=s, marker=MARKERS[k % len(MARKERS)],
-                           c=[point_color(a) for a in sub[color_by]], edgecolor=[area_color(a) for a in sub[color_by]],
-                           linewidth=POINT_EDGE, zorder=3)
-            pos += n
         sub = pooled[pooled['pair_type'] == t]
-        if len(sub):                                           # mean over the pairs of the type, across its swarm
-            mean_bar(ax, [centres[i] - max(ext[i], 8.0), centres[i] + max(ext[i], 8.0)], sub[ycol].mean(), '0.15', pad=0)
+        gx = colour_group_x(sub[color_by], centres[i])
+        for k, tab in enumerate(tables):
+            st = tab[tab['pair_type'] == t]
+            if len(st):
+                ax.scatter(st[color_by].map(colour_group).map(gx), st[ycol], s=s, marker=MARKERS[k % len(MARKERS)],
+                           c=[point_color(a) for a in st[color_by]], edgecolor=[area_color(a) for a in st[color_by]],
+                           linewidth=POINT_EDGE, zorder=3)
+        if len(sub):                                           # mean over the pairs of the type, across its groups
+            half = max(0.12, (max(gx.values()) - min(gx.values())) / 2 + 0.06)
+            mean_bar(ax, [centres[i] - half, centres[i] + half], sub[ycol].mean(), '0.15', pad=0)
     ax.set_xticks(centres)
     short_type_ticks(ax)
     ax.set_ylabel(ylabel)
@@ -388,41 +334,6 @@ def add_source_reader(pt, res):
     return pt
 
 
-def paired_offsets(ax, x0, x1, y0, y1, markers, s=14, half_width=0.3, gap_pt=0.5):
-    """One sideways offset (data units) per line from (x0, y0[i]) to (x1, y1[i]), chosen so that neither end marker
-    (codes ``markers``, size s pt²) comes closer than gap_pt to another line's end marker at the same x, measured between
-    exact outlines including the edge line; lines are placed in order of height at the free offset nearest zero. Needs
-    the final axis limits."""
-    dpi, tr, y_ref = ax.figure.dpi, ax.transData, ax.get_ylim()[0]
-    sup = {m_: marker_support(m_, np.sqrt(s), dpi) for m_ in set(markers)}
-    gap, reach = gap_pt * dpi / 72, 2 * max(h.max() for h in sup.values()) + gap_pt * dpi / 72
-    upx = tr.transform((x0 + 1, y_ref))[0] - tr.transform((x0, y_ref))[0]
-    p0 = tr.transform(np.column_stack([np.full(len(y0), float(x0)), y0]))[:, 1]
-    p1 = tr.transform(np.column_stack([np.full(len(y1), float(x1)), y1]))[:, 1]
-    hw, step = half_width * upx, reach / 12
-    placed, out = [], np.zeros(len(y0))
-    for i in np.argsort(p0 + p1):
-        best, best_gap, k = 0.0, -np.inf, 0
-        while True:
-            off = (k + 1) // 2 * step * (1 if k % 2 else -1)
-            if abs(off) > hw:
-                break
-            g = np.inf
-            for o, a_, b_, mk in placed:
-                for pa, pb in ((p0[i], a_), (p1[i], b_)):
-                    if abs(pb - pa) < reach:
-                        g = min(g, marker_gap(sup[markers[i]], sup[mk], (o - off, pb - pa))[0])
-            if g >= gap:
-                best = off
-                break
-            if g > best_gap:
-                best, best_gap = off, g
-            k += 1
-        placed.append((best, p0[i], p1[i], markers[i]))
-        out[i] = best / upx
-    return out
-
-
 POP_SUB_X = {True: (0.0, 1.0), False: (2.1, 3.1)}   # (population, subspace) x positions: frontal, non-frontal source
 
 
@@ -431,7 +342,7 @@ def population_vs_subspace_panel(ax, pooled):
     left end = context decoding from all 30 source units (AREA_READER), right end = from the source activity projected
     onto the communication subspace (READER), averaged over that source's targets; same reader and held-out blocks on
     both ends. Filled = the source's all-unit decoding is above every block-permutation draw, open = not; marker =
-    session. Lines are offset sideways just enough that no two markers touch. Bold lines: mean over the above-null sources of each group; brackets: frontal vs.
+    session. Each session's lines share one sideways offset. Bold lines: mean over the above-null sources of each group; brackets: frontal vs.
     non-frontal sources for the population and for the subspace accuracy (Mann–Whitney across above-null source
     instances); title: mean change (subspace − population) per group, same test."""
     q = pooled.copy()
@@ -447,8 +358,7 @@ def population_vs_subspace_panel(ax, pooled):
         col = GROUP_COLOR['frontal' if fr else 'other']
         x0, x1 = POP_SUB_X[fr]
         rows = g[g['frontal'] == fr].sort_values('pred').copy()   # open (not above null) first, filled on top
-        rows['dx'] = paired_offsets(ax, x0, x1, rows['pop'].values, rows['sub'].values,
-                                    [MARKERS[SESSIONS.index(sid) % len(MARKERS)] for sid in rows['session']])
+        rows['dx'] = [(SESSIONS.index(sid) - (len(SESSIONS) - 1) / 2) * 0.12 for sid in rows['session']]   # one x per session
         for _, r in rows.iterrows():
             k = SESSIONS.index(r['session'])
             dx = r['dx']
@@ -671,28 +581,19 @@ def subspace_decoding_panel(ax, tables, pooled, color_by='target', prefix='sub_a
     (source_label_permutation_p). Asterisks under the x-axis labels: each pair type vs. its block-permutation null
     (Wilcoxon on accuracy − null mean, all pairs)."""
     ax.set_ylim(0.2, 1.0)
-    # one swarm per pair type (all sessions together, so points of different sessions do not overlap either); columns are
-    # as wide as their swarms need (swarm_columns), so x is in points
-    cols = [[(k, t[t['pair_type'] == typ]) for k, t in enumerate(tables)] for typ in PAIR_TYPES]
-    ys = [np.concatenate([sub[f'{prefix}_cv'].values for _, sub in parts]) for parts in cols]
-    mks = [[MARKERS[k % len(MARKERS)] for k, sub in parts for _ in range(len(sub))] for parts in cols]
-    centres, ext, xs, _ = swarm_columns(ax, ys, mks, [SHORT[t] for t in PAIR_TYPES], s=SWARM_S)
-    u0 = ax.get_xlim()[1] / (len(PAIR_TYPES) + 0.4)           # one column of an even layout (pt)
-    box = np.maximum(ext + 2.0, 0.45 * u0)
-    lo, hi = centres - box, centres + box
-    for i in range(len(PAIR_TYPES) - 1):                       # neighbouring null boxes meet halfway between the swarms
-        mid = (centres[i] + ext[i] + centres[i + 1] - ext[i + 1]) / 2
-        hi[i], lo[i + 1] = min(hi[i], mid - 1.0), max(lo[i + 1], mid + 1.0)
+    # within a pair type, each colour group of the color_by area has its own x, shared by all its pairs (as Figure 1A)
+    ax.set_xlim(-0.5, len(PAIR_TYPES) - 0.5)
+    centres = np.arange(len(PAIR_TYPES), dtype=float)
+    half = np.zeros(len(PAIR_TYPES))                          # half-width of each column's groups (data x)
     for i, typ in enumerate(PAIR_TYPES):
         sub_all = pooled[pooled['pair_type'] == typ]
-        ax.fill_between([lo[i], hi[i]], sub_all[f'{prefix}_block_null_lo'].mean(), sub_all[f'{prefix}_block_null_hi'].mean(),
-                        color='0.88', lw=0, zorder=0)
-        parts, xall, yall = cols[i], xs[i], ys[i]
-        pos = 0
-        for k, sub in parts:
-            n = len(sub)
-            x, yv, q = xall[pos:pos + n], yall[pos:pos + n], sub[f'{prefix}_predictive'].values.astype(bool)
-            pos += n
+        gx = colour_group_x(sub_all[color_by], centres[i])
+        half[i] = max(0.12, (max(gx.values()) - min(gx.values())) / 2 + 0.06)
+        ax.fill_between([centres[i] - 0.45, centres[i] + 0.45], sub_all[f'{prefix}_block_null_lo'].mean(),
+                        sub_all[f'{prefix}_block_null_hi'].mean(), color='0.88', lw=0, zorder=0)
+        for k, t in enumerate(tables):
+            sub = t[t['pair_type'] == typ]
+            x, yv, q = sub[color_by].map(colour_group).map(gx).values, sub[f'{prefix}_cv'].values, sub[f'{prefix}_predictive'].values.astype(bool)
             ax.scatter(x[q], yv[q], s=SWARM_S, marker=MARKERS[k % len(MARKERS)], c=[point_color(t_) for t_ in sub[color_by].values[q]], edgecolor=[area_color(t_) for t_ in sub[color_by].values[q]], linewidth=POINT_EDGE, zorder=3)
             ax.scatter(x[~q], yv[~q], s=SWARM_S, marker=MARKERS[k % len(MARKERS)], color='white', edgecolor=[area_color(t_) for t_ in sub[color_by].values[~q]], linewidth=POINT_EDGE,
                        zorder=3)
@@ -715,7 +616,7 @@ def subspace_decoding_panel(ax, tables, pooled, color_by='target', prefix='sub_a
     fr = q['pair_type'].str.startswith('frontal')
     p_fr = source_label_permutation_p(q, f'{prefix}_cv')
     m_fr, m_ot = q[f'{prefix}_cv'][fr].mean(), q[f'{prefix}_cv'][~fr].mean()
-    span = [(centres[i] - max(ext[i], 0.35 * u0), centres[i] + max(ext[i], 0.35 * u0)) for i in range(len(PAIR_TYPES))]
+    span = [(centres[i] - half[i], centres[i] + half[i]) for i in range(len(PAIR_TYPES))]
     group_bars_and_bracket(ax, centres[:2], centres[2:], m_fr, m_ot, p_fr, yb=0.945, h=0.015,
                            bar_x=([span[0][0], span[1][1]], [span[2][0], span[3][1]]))
     ax.set_title(f'Comm. subspace: context decoding\nfrontal→ {m_fr:.0%} vs. others→ {m_ot:.0%}, {p_text(p_fr)}', loc='left')
