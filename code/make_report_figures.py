@@ -1,8 +1,9 @@
 """Portrait-format (6.5 in wide) figures for the short report, drawn from the pooled outputs of one
-regression setting (by default the full nuisance set in results_regress_full/).
+results tree (by default results_3sessions/; set RESULTS_DIR=../results_11sessions for the eleven-session capsule run).
 
-    python make_report_figures.py        # local: ../results_regress_full -> ../results/report/figures/*.svg
-    RESULTS_DIR=/root/capsule/results python make_report_figures.py   # capsule: -> $RESULTS_DIR/report/figures
+    python make_report_figures.py                                   # ../results_3sessions -> ../results_3sessions/report/figures/*.svg
+    RESULTS_DIR=../results_11sessions python make_report_figures.py  # -> ../results_11sessions/report/figures
+    ALIGN_QC_DIR=<dir> also writes PNG copies (the report builder reads report/figures_png)
 
 Sessions are every ``<session>/alignment_results.pkl`` found under RESULTS_DIR (the three
 local sessions, or all sessions of a capsule run). ``REPORT_DIR`` overrides the output folder.
@@ -24,6 +25,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib import patheffects as pe
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MultipleLocator, PercentFormatter
 from scipy import stats
@@ -31,13 +33,13 @@ from scipy import stats
 import make_alignment_figures as m
 from make_alignment_figures import (FDR_ALPHA, GROUP_COLOR, MARKERS, PAIR_COLOR, PAIR_LABEL, PAIR_TYPES, REGION_COLOR,
                                     area_color, area_group, area_region, region_legend,
-                                    area_order, place_letters, qualify, r2_at_dimensionality, save)
+                                    area_order, place_letters, POINT_EDGE, point_color, qualify, r2_at_dimensionality, save, soft)
 
 plt.rcParams.update({'font.size': 7, 'axes.titlesize': 7.5, 'axes.labelsize': 7, 'xtick.labelsize': 6.5,
                      'ytick.labelsize': 6.5, 'legend.fontsize': 6.2, 'legend.title_fontsize': 6.5})
 
 BUNDLE = Path(__file__).resolve().parent.parent
-RESULTS_DIR = Path(os.environ.get('RESULTS_DIR', BUNDLE / 'results_regress_full'))
+RESULTS_DIR = Path(os.environ.get('RESULTS_DIR', BUNDLE / 'results_3sessions'))
 SESSIONS = sorted(p.parent.name for p in RESULTS_DIR.glob('*/alignment_results.pkl'))
 SHORT = {'frontal->frontal': 'Frontal\n→ Frontal', 'frontal->other': 'Frontal\n→ Others', 'other->frontal': 'Others\n→ Frontal',
          'other->other': 'Others\n→ Others'}
@@ -74,7 +76,7 @@ def scatter_types(ax, tables, xcol, ycol, s=14):
     for k, t in enumerate(tables):
         for typ in PAIR_TYPES:
             sub = t[t['pair_type'] == typ]
-            ax.scatter(sub[xcol], sub[ycol], s=s, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[typ], edgecolor='k', linewidth=0.3)
+            ax.scatter(sub[xcol], sub[ycol], s=s, marker=MARKERS[k % len(MARKERS)], color=soft(PAIR_COLOR[typ]), edgecolor=PAIR_COLOR[typ], linewidth=POINT_EDGE)
 
 
 # ----------------------------------------------------------------------------- R1
@@ -111,12 +113,20 @@ def p_text(p):
 OTHERS_BAR = GROUP_COLOR['other']   # mean bar over all non-frontal areas: the 'others' orange of the pair-type figures
 
 
+def mean_bar(ax, xs, mval, col):
+    """Group-mean bar spanning the group's x range. Drawn above the markers, slightly transparent, with thin opaque black
+    edges (offset so they do not overlap the coloured line and tint it) so the bar stays visible over a dense swarm."""
+    edges = [pe.Stroke(offset=(0, dy), linewidth=0.5, foreground='k', alpha=1) for dy in (0.95, -0.95)]
+    ax.plot([min(xs) - 0.35, max(xs) + 0.35], [mval] * 2, color=col, lw=1.4, alpha=0.75, zorder=4,
+            solid_capstyle='butt', path_effects=edges + [pe.Normal()])
+
+
 def group_bars_and_bracket(ax, x_fr, x_ot, mean_fr, mean_ot, p, yb, h=0.02):
     """Thick coloured bars at the two group means (spanning the groups' x ranges) and a bracket between the groups
     annotated with the test result."""
 
     for xs, mval, col in ((x_fr, mean_fr, GROUP_COLOR['frontal']), (x_ot, mean_ot, OTHERS_BAR)):
-        ax.plot([min(xs) - 0.35, max(xs) + 0.35], [mval] * 2, color=col, lw=2.0, alpha=0.45, zorder=2, solid_capstyle='butt')
+        mean_bar(ax, xs, mval, col)
     for xs in (x_fr, x_ot):
         ax.plot([min(xs), min(xs), max(xs), max(xs)], [yb - h, yb, yb, yb - h], color='k', lw=0.8)
     c_fr, c_ot = np.mean([min(x_fr), max(x_fr)]), np.mean([min(x_ot), max(x_ot)])
@@ -136,11 +146,11 @@ def acc_area_panel(ax, areas_tab, order):
         for (_, r), dx in zip(rows.iterrows(), offs):
             k = SESSIONS.index(r['session'])
             pred = bool(r['acc_predictive'])
-            c = area_color(a)
+            c = point_color(a)
             ax.plot([i + dx, i + dx], [r['acc_block_null_lo'], r['acc_block_null_hi']], color='0.8', lw=3.2 if len(rows) > 1 else 4,
                     solid_capstyle='butt', alpha=0.6, zorder=1)
             ax.errorbar(i + dx, r['acc_cv'], yerr=r['acc_cv_sd'], fmt=MARKERS[k % len(MARKERS)], ms=4.2, color=c, mfc=c if pred else 'white',
-                        mec=c, mew=0.8 if pred else 1.3, elinewidth=0.6, capsize=0, zorder=3)
+                        mec=area_color(a), mew=POINT_EDGE, elinewidth=0.6, capsize=0, zorder=3)
     ax.set_xticks(range(len(order)))
     ax.set_xticklabels(order, rotation=90)
     for lab, a in zip(ax.get_xticklabels(), order):
@@ -188,7 +198,7 @@ def figure_r1(results, out_dir, color_by='target'):
     strip(axA, tables, 'r2_cv_dim', 'cross-validated R²\n(rank-d fit, held-out trials)', color_by=color_by)
     axA.set_ylim(0, pooled['r2_cv_dim'].max() * 1.15)
     axA.axhline(0, color='k', ls='--', lw=0.7)
-    axA.set_xlabel('pair type (source → target)')
+    axA.set_xlabel('source → target')
     counts = pooled['pair_type'].value_counts()
     axA.text(0.03, 0.98, '\n'.join(f'{SHORT[t].replace(chr(10), " ")}: n = {counts.get(t, 0)}' for t in PAIR_TYPES), transform=axA.transAxes,
              va='top', fontsize=6)
@@ -212,32 +222,137 @@ def figure_r1(results, out_dir, color_by='target'):
     save(fig, out_dir / ('figure_R1_subspace_and_decoding.svg' if color_by == 'target' else f'figure_R1_subspace_and_decoding_by_{color_by}.svg'))
 
 
+def subspace_vs_axis_panel(ax, tables, pooled):
+    """Context decoding from the communication subspace (y) against context decoding from the source's context axis, i.e.
+    the LDA on all 30 source units (x), one point per pair; colour = source group, marker = session, filled = source axis
+    predictive. Dashed line: identity. Text: Spearman correlation and mean difference across pairs."""
+    for k, t in enumerate(tables):
+        for g in GROUP_COLOR:
+            sub = t[t['source'].map(area_group) == g]
+            q = sub['source_axis_predictive'].values.astype(bool)
+            for mask, mfc in ((q, GROUP_COLOR[g]), (~q, 'white')):
+                ax.scatter(sub['source_acc_cv'].values[mask], sub['sub_acc_cv'].values[mask], s=14, marker=MARKERS[k % len(MARKERS)],
+                           color=mfc, edgecolor=GROUP_COLOR[g] if mfc == 'white' else 'k', linewidth=0.7 if mfc == 'white' else 0.3,
+                           zorder=3)
+    lo, hi = 0.4, 0.9
+    ax.plot([lo, hi], [lo, hi], 'k--', lw=0.7, zorder=1)
+    ax.axhline(0.5, color='0.6', lw=0.5, ls=':')
+    ax.axvline(0.5, color='0.6', lw=0.5, ls=':')
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(lo, hi)
+    ax.set_aspect('equal')
+    ax.xaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
+    ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
+    ax.xaxis.set_major_locator(MultipleLocator(0.1))
+    ax.yaxis.set_major_locator(MultipleLocator(0.1))
+    ax.set_xlabel('context decoding accuracy\ncontext axis (LDA, 30 units)')
+    ax.set_ylabel('context decoding accuracy\ncomm. subspace')
+    rho, pval = stats.spearmanr(pooled['source_acc_cv'], pooled['sub_acc_cv'])
+    diff = (pooled['sub_acc_cv'] - pooled['source_acc_cv']).mean()
+    ax.set_title(f'Subspace vs. context-axis decoding\nρ = {rho:.2f}, {p_text(pval)}; subspace − axis = {diff:+.2f}', loc='left')
+    h = [Line2D([], [], marker='o', color=GROUP_COLOR['frontal'], ls='', ms=4, label='Frontal source'),
+         Line2D([], [], marker='o', color=GROUP_COLOR['other'], ls='', ms=4, label='Other source'),
+         Line2D([], [], marker='o', mfc='white', mec='0.4', ls='', ms=4, label='Source axis not predictive')]
+    ax.legend(handles=h, loc='lower right', frameon=False, handletextpad=0.3, labelspacing=0.2, borderaxespad=0.1, fontsize=5.8)
+    return rho, diff
+
+
+def figure_rs2(results, out_dir):
+    """Supplementary Figure 2: does the communication subspace carry more context than its source population has?
+    A: context decoded from the subspace against context decoded from the source population, all pairs, with a
+    least-squares line per source group. B: the difference (subspace − source), pairs with a predictive source only."""
+    tables = [qualify(r) for r in results]
+    pooled = pd.concat(tables, ignore_index=True)
+    pooled['frontal_src'] = pooled['pair_type'].str.startswith('frontal')
+    groups = ((True, GROUP_COLOR['frontal'], 'Frontal source'), (False, GROUP_COLOR['other'], 'Non-frontal source'))
+
+    fig = plt.figure(figsize=(W, 3.3))
+    gs = fig.add_gridspec(1, 2, width_ratios=[1.15, 1], wspace=0.4, left=0.1, right=0.985, top=0.86, bottom=0.17)
+    axA, axB = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])
+
+    # A: subspace decoding vs. source-population decoding, every pair
+    for k, sid in enumerate(SESSIONS):
+        for fr, col, _ in groups:
+            g = pooled[(pooled['session'] == sid) & (pooled['frontal_src'] == fr)]
+            axA.scatter(g['source_acc_cv'], g['sub_acc_cv'], s=14, marker=MARKERS[k % len(MARKERS)], color=col, edgecolor='k',
+                        linewidth=0.3, zorder=3)
+    lo = min(pooled['source_acc_cv'].min(), pooled['sub_acc_cv'].min()) - 0.02
+    hi = max(pooled['source_acc_cv'].max(), pooled['sub_acc_cv'].max()) + 0.02
+    axA.plot([lo, hi], [lo, hi], color='0.5', ls=':', lw=0.8, zorder=1)
+    fits = {}
+    for fr, col, _ in groups:
+        g = pooled[pooled['frontal_src'] == fr]
+        fits[fr] = stats.linregress(g['source_acc_cv'], g['sub_acc_cv'])
+        xs = np.array([g['source_acc_cv'].min(), g['source_acc_cv'].max()])
+        axA.plot(xs, fits[fr].intercept + fits[fr].slope * xs, color=col, lw=1.5, zorder=4)
+    f_all = stats.linregress(pooled['source_acc_cv'], pooled['sub_acc_cv'])
+    axA.set_xlim(lo, hi)
+    axA.set_ylim(lo, hi)
+    axA.set_aspect('equal')
+    axA.xaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
+    axA.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
+    axA.set_xlabel('Decoding, source population')
+    axA.set_ylabel('Decoding, comm. subspace')
+    axA.set_title(f'Subspace vs. source population\nslope {f_all.slope:.2f} (frontal {fits[True].slope:.2f}, others {fits[False].slope:.2f})', loc='left')
+    h = [Line2D([], [], marker='s', ls='', color=col, label=lab) for _, col, lab in groups] + \
+        [Line2D([], [], color='0.5', ls=':', label='Identity')]
+    axA.legend(handles=h, loc='upper left', frameon=False, handletextpad=0.3, labelspacing=0.25, borderaxespad=0.2)
+
+    # B: transmitted context (subspace − source population), pairs with a predictive source
+    q = pooled[pooled['source_axis_predictive']].copy()
+    q['d'] = q['sub_acc_cv'] - q['source_acc_cv']
+    rng = np.random.default_rng(0)
+    for i, (fr, col, _) in enumerate(groups):
+        for k, sid in enumerate(SESSIONS):
+            g = q[(q['session'] == sid) & (q['frontal_src'] == fr)]
+            axB.scatter(i + rng.uniform(-0.22, 0.22, len(g)), g['d'], s=14, marker=MARKERS[k % len(MARKERS)], color=col,
+                        edgecolor='k', linewidth=0.3, zorder=3)
+        v = q.loc[q['frontal_src'] == fr, 'd']
+        axB.errorbar(i + 0.36, v.mean(), yerr=v.std(ddof=1) / np.sqrt(len(v)), fmt='_', color='k', ms=9, mew=1.4, capsize=0, zorder=4)
+    d_fr, d_ot = q.loc[q['frontal_src'], 'd'], q.loc[~q['frontal_src'], 'd']
+    p_tr = stats.mannwhitneyu(d_fr, d_ot).pvalue
+    axB.axhline(0, color='k', ls='--', lw=0.7)
+    axB.set_xticks([0, 1])
+    axB.set_xticklabels(['Frontal\nsource', 'Non-frontal\nsource'])
+    axB.set_xlim(-0.6, 1.7)
+    axB.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
+    axB.set_ylabel('Subspace − source population')
+    axB.set_title(f'Transmitted context\n{d_fr.mean():+.1%} vs. {d_ot.mean():+.1%}, {p_text(p_tr)}', loc='left')
+
+    place_letters(fig, [axA, axB], 'AB', dx=-0.075)
+    save(fig, out_dir / 'figure_S2_transmission.svg')
+
 def figure_rs1(results, out_dir):
-    """Supplementary Figure 1: how the communication-subspace dimensionality is chosen."""
+    """Supplementary Figure 1: how the communication-subspace dimensionality is chosen. Colour = region / frontal
+    subgroup of the target area, as in Figures R1 and R2."""
     tables = [qualify(r) for r in results]
     pooled = pd.concat(tables, ignore_index=True)
     n = results[0]['min_units']
     fig = plt.figure(figsize=(W, 2.9))
-    gs = fig.add_gridspec(1, 2, width_ratios=[1.25, 1], wspace=0.45, left=0.11, right=0.985, top=0.84, bottom=0.2)
+    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1, 0.5], wspace=0.36, left=0.09, right=0.99, top=0.84, bottom=0.2)
     axA = fig.add_subplot(gs[0, 0])
     axB = fig.add_subplot(gs[0, 1])
+    axL = fig.add_subplot(gs[0, 2])
+    axL.axis('off')
     ranks = np.arange(1, n + 1)
     for res, tab in zip(results, tables):
         curves = res['r2_curve'].mean(axis=0)
         for p in range(len(res['pairs'])):
-            typ = tab.iloc[p]['pair_type']
-            axA.plot(ranks, curves[p], color=PAIR_COLOR[typ], lw=0.45, alpha=0.8)
+            tgt = tab.iloc[p]['target']
+            axA.plot(ranks, curves[p], color=area_color(tgt), lw=0.45, alpha=0.8)
             d = tab.iloc[p]['dim']
-            axA.plot(d, np.interp(d, ranks, curves[p]), marker='o', ms=2.2, color=PAIR_COLOR[typ], mec='k', mew=0.3, ls='')
+            axA.plot(d, np.interp(d, ranks, curves[p]), marker='o', ms=2.2, color=point_color(tgt), mec=area_color(tgt), mew=POINT_EDGE, ls='')
     axA.axhline(0, color='k', lw=0.6, ls=':')
     axA.set_xlim(0.5, n + 0.5)
     axA.set_xlabel('Rank')
     axA.set_ylabel('R² (cross-validated)')
     axA.set_title('R² vs. rank', loc='left')
-    strip(axB, tables, 'dim', 'Dimensionality')
-    axB.set_xlabel('Pair type')
+    strip(axB, tables, 'dim', 'Dimensionality', color_by='target')
+    axB.set_xlabel('Source → target')
     axB.set_ylim(0, 12)
     axB.set_title('Dimensionality', loc='left')
+    region_legend(axL, set(pooled['target']), loc='center left', bbox_to_anchor=(0.0, 0.5), handletextpad=0.3,
+                  labelspacing=0.3, borderaxespad=0.0, fontsize=5.5, title_fontsize=6)
     place_letters(fig, [axA, axB], 'AB', dx=-0.075)
     save(fig, out_dir / 'figure_S1_dimensionality.svg')
 
@@ -262,8 +377,8 @@ def alignment_by_area_panel(ax, pooled, area_col, excess, order, frontal_mask, y
             if m_.any():
                 ax.scatter(i + rng.uniform(-0.15, 0.15, int(m_.sum())), excess[m_].values, s=12,
                            marker=MARKERS[SESSIONS.index(sid) % len(MARKERS)],
-                           c=[area_color(b) for b in pooled.loc[m_, color_col]],
-                           edgecolor='k', linewidth=0.3, zorder=3)
+                           c=[point_color(b) for b in pooled.loc[m_, color_col]],
+                           edgecolor=[area_color(b) for b in pooled.loc[m_, color_col]], linewidth=POINT_EDGE, zorder=3)
     ax.axhline(0, color='k', ls='--', lw=0.7)
     ax.set_xticks(range(len(order)))
     ax.set_xticklabels(order, rotation=90)
@@ -275,8 +390,7 @@ def alignment_by_area_panel(ax, pooled, area_col, excess, order, frontal_mask, y
     i_ot = [i for i, a in enumerate(order) if area_group(a) != 'frontal']
     for g, mask, col in ((i_fr, frontal_mask, GROUP_COLOR['frontal']), (i_ot, ~frontal_mask, OTHERS_BAR)):
         if g and mask.any():        # group mean bar only when the group has pairs
-            ax.plot([min(g) - 0.35, max(g) + 0.35], [excess[mask].mean()] * 2, color=col, lw=2.0, alpha=0.45,
-                    zorder=2, solid_capstyle='butt')
+            mean_bar(ax, g, excess[mask].mean(), col)
     # frontal-vs-other comparison needs both groups (one session alone may have only one)
     if not i_fr or not i_ot or frontal_mask.sum() < 2 or (~frontal_mask).sum() < 2:
         return np.nan
@@ -337,13 +451,13 @@ def figure_r2(results, out_dir, color_by='target'):
     for k, t in enumerate(tables):
         if len(t):                                             # colour = region / frontal subgroup of the source area
             axC.scatter(t['source_acc_cv'], t['excess'], s=14, marker=MARKERS[k % len(MARKERS)],
-                        c=[area_color(a) for a in t['source']], edgecolor='k', linewidth=0.3)
+                        c=[point_color(a) for a in t['source']], edgecolor=[area_color(a) for a in t['source']], linewidth=POINT_EDGE)
     axC.axhline(0, color='k', ls='--', lw=0.7)
     rho, pval = stats.spearmanr(pooled['source_acc_cv'], pooled['excess'])
     fit = stats.linregress(pooled['source_acc_cv'], pooled['excess'])
     xfit = np.array([pooled['source_acc_cv'].min(), pooled['source_acc_cv'].max()])
     axC.plot(xfit, fit.intercept + fit.slope * xfit, color='k', lw=1.1, zorder=4)
-    axC.set_xlabel('Decoding accuracy (source axis)')
+    axC.set_xlabel('Context decoding accuracy (source area)')
     axC.xaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
     axC.xaxis.set_major_locator(MultipleLocator(0.05))
     axC.set_ylabel(ylab)
@@ -374,8 +488,8 @@ def subspace_decoding_panel(ax, tables, pooled, color_by='target'):
             n = len(sub)
             x, yv, q = xall[pos:pos + n], yall[pos:pos + n], sub['sub_acc_predictive'].values.astype(bool)
             pos += n
-            ax.scatter(x[q], yv[q], s=14, marker=MARKERS[k % len(MARKERS)], c=[area_color(t_) for t_ in sub[color_by].values[q]], edgecolor='k', linewidth=0.3, zorder=3)
-            ax.scatter(x[~q], yv[~q], s=14, marker=MARKERS[k % len(MARKERS)], color='white', edgecolor=[area_color(t_) for t_ in sub[color_by].values[~q]], linewidth=1.1,
+            ax.scatter(x[q], yv[q], s=14, marker=MARKERS[k % len(MARKERS)], c=[point_color(t_) for t_ in sub[color_by].values[q]], edgecolor=[area_color(t_) for t_ in sub[color_by].values[q]], linewidth=POINT_EDGE, zorder=3)
+            ax.scatter(x[~q], yv[~q], s=14, marker=MARKERS[k % len(MARKERS)], color='white', edgecolor=[area_color(t_) for t_ in sub[color_by].values[~q]], linewidth=POINT_EDGE,
                        zorder=3)
     ax.set_xticks(range(len(PAIR_TYPES)))
     short_type_ticks(ax)
@@ -384,7 +498,7 @@ def subspace_decoding_panel(ax, tables, pooled, color_by='target'):
     ax.axhline(0.5, color='k', ls='--', lw=0.7)
     ax.set_ylim(0.2, 1.0)
     ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
-    ax.set_xlabel('pair type (source → target)')
+    ax.set_xlabel('source → target')
     # each pair type vs. its block-permutation null: mark next to the tick label
     y_mark = pooled['sub_acc_cv'].max() + 0.012          # one common height so the marks do not encode a value
     for i, typ in enumerate(PAIR_TYPES):                 # each pair type vs. its block-permutation null
@@ -421,7 +535,7 @@ def cross_block_panel(ax, d=None):
             j = rng.uniform(-0.08, 0.08)
             y = [r[cc] for cc in cols]
             ax.plot(np.arange(2) + j, y, color=PAIR_COLOR[r['pair_type']], lw=0.45, alpha=0.5)
-            ax.scatter(np.arange(2) + j, y, s=7, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[r['pair_type']], edgecolor='k', linewidth=0.2, zorder=3)
+            ax.scatter(np.arange(2) + j, y, s=7, marker=MARKERS[k % len(MARKERS)], color=soft(PAIR_COLOR[r['pair_type']]), edgecolor=PAIR_COLOR[r['pair_type']], linewidth=POINT_EDGE, zorder=3)
     ax.plot(np.arange(2) + 0.22, [pooled[cc].mean() for cc in cols], 'k_', ms=10, mew=1.5, zorder=4)
     p = stats.wilcoxon(pooled['cos_cross'], pooled['cos_cross_null']).pvalue
     yb = pooled[cols].values.max() + 0.06
@@ -438,7 +552,7 @@ def cross_block_panel(ax, d=None):
 
 
 def main(argv):
-    default_out = RESULTS_DIR / 'report' / 'figures' if 'RESULTS_DIR' in os.environ else BUNDLE / 'results' / 'report' / 'figures'
+    default_out = RESULTS_DIR / 'report' / 'figures'
     out_dir = Path(os.environ.get('REPORT_DIR', default_out))
     out_dir.mkdir(parents=True, exist_ok=True)
     if not SESSIONS:
@@ -447,6 +561,7 @@ def main(argv):
     full = load_results()
     figure_r1(full, out_dir)
     figure_rs1(full, out_dir)
+    figure_rs2(full, out_dir)
     figure_r2(full, out_dir)
     print(f'report figures written to {out_dir}')
 

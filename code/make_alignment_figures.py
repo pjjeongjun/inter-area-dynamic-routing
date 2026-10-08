@@ -20,6 +20,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.colors import to_rgb
 from matplotlib.lines import Line2D
 
 from task_axis_comm_subspace import FDR_ALPHA, area_group, fdr_bh, p_two_sided
@@ -92,6 +93,23 @@ def area_color(area: str) -> str:
     if area_group(area) == 'frontal':
         return SUBGROUP_COLOR[FRONTAL_SUBGROUP.get(area, 'Frontal: MOs')]
     return REGION_COLOR[area_region(area)]
+
+
+POINT_LIGHTEN, POINT_ALPHA = 0.1, 0.5   # data-point fill: colour blended 10 % towards white, 50 % opaque
+POINT_EDGE = 0.5   # marker edge width (pt) of every data point, filled or open
+
+
+def soft(color, alpha=POINT_ALPHA):
+    """Fill colour of data points: the colour slightly lighter and semi-transparent, so dense clouds of points read
+    less heavily. Marker edges are the full, opaque colour (filled and open markers alike); tick labels, legends, lines
+    and bars keep the full colour too."""
+    rgb = np.asarray(to_rgb(color))
+    return (*(rgb + (1 - rgb) * POINT_LIGHTEN), alpha)
+
+
+def point_color(area):
+    """soft() of an area's colour."""
+    return soft(area_color(area))
 
 
 def region_legend(ax, areas, loc='upper left', **kw):
@@ -291,9 +309,9 @@ def strip_by_type(ax, table, ycol, ylabel, zero_line=None, y_err=None, show_mean
         if sub.empty:
             continue
         x = i + rng.uniform(-0.18, 0.18, len(sub))
-        ax.scatter(x, sub[ycol], s=16, color=PAIR_COLOR[t], edgecolor='k', linewidth=0.3, zorder=3)
+        ax.scatter(x, sub[ycol], s=16, color=soft(PAIR_COLOR[t]), edgecolor=PAIR_COLOR[t], linewidth=POINT_EDGE, zorder=3)
         if y_err is not None:
-            ax.errorbar(x, sub[ycol], yerr=sub[y_err], fmt='none', ecolor=PAIR_COLOR[t], elinewidth=0.6, zorder=2)
+            ax.errorbar(x, sub[ycol], yerr=sub[y_err], fmt='none', ecolor=soft(PAIR_COLOR[t]), elinewidth=0.6, zorder=2)
         if show_mean and len(sub) > 1:
             m, se = sub[ycol].mean(), sub[ycol].std(ddof=1) / np.sqrt(len(sub))
             ax.errorbar(i + 0.32, m, yerr=se, fmt='_', color='k', ms=9, mew=1.4, elinewidth=1.0, capsize=0, zorder=4)
@@ -319,8 +337,8 @@ def task_axis_panels(axA, axB, at, areas, xlabels, colors, sessions_of=None, ses
                 if ax is axB and null_band:      # this area instance's block-permutation null range
                     ax.plot([i, i], [r['acc_block_null_lo'], r['acc_block_null_hi']], color='0.8', lw=5, solid_capstyle='butt',
                             alpha=0.6, zorder=1)
-                ax.errorbar(i, r[col], yerr=r[err], fmt=mk, ms=6, color=colors[i], mfc=colors[i] if pred else 'white',
-                            mec=colors[i], mew=1.0, elinewidth=0.8, capsize=0, zorder=3)
+                ax.errorbar(i, r[col], yerr=r[err], fmt=mk, ms=6, color=soft(colors[i]), mfc=soft(colors[i]) if pred else 'white',
+                            mec=colors[i], mew=POINT_EDGE, elinewidth=0.8, capsize=0, zorder=3)
         ax.set_xticks(x)
         ax.set_xticklabels(xlabels, rotation=45 if len(areas) > 6 else 0, ha='right' if len(areas) > 6 else 'center')
         for lab, c in zip(ax.get_xticklabels(), colors):
@@ -398,7 +416,7 @@ def supp_figure1(res, out_dir: Path):
         typ = pt.iloc[p]['pair_type']
         axA.plot(ranks, curves[p], color=PAIR_COLOR[typ], lw=0.9, alpha=0.9)
         d = pt.iloc[p]['dim']
-        axA.plot(d, np.interp(d, ranks, curves[p]), marker='o', ms=3.2, color=PAIR_COLOR[typ], mec='k', mew=0.3, ls='')
+        axA.plot(d, np.interp(d, ranks, curves[p]), marker='o', ms=3.2, color=soft(PAIR_COLOR[typ]), mec=PAIR_COLOR[typ], mew=POINT_EDGE, ls='')
     axA.axhline(0, color='k', lw=0.6, ls=':')
     axA.set_xlim(0.5, n + 0.5)
     axA.set_xlabel('number of predictive dimensions (rank)')
@@ -491,13 +509,13 @@ def figure2(res, out_dir: Path):
     for t in PAIR_TYPES:
         sub = pt[pt['pair_type'] == t]
         sig = sub['cos_shuf_q'] <= FDR_ALPHA
-        for flag, mfc in [(True, PAIR_COLOR[t]), (False, 'white')]:
+        for flag, mfc in [(True, soft(PAIR_COLOR[t])), (False, 'white')]:
             s2 = sub[sig == flag]
             if s2.empty:
                 continue
             axB.errorbar(s2['cos_shuf_mean'], s2['cos'], yerr=s2['cos_sd'],
                          xerr=np.vstack([s2['cos_shuf_mean'] - s2['cos_shuf_lo'], s2['cos_shuf_hi'] - s2['cos_shuf_mean']]),
-                         fmt='o', ms=4.5, color=PAIR_COLOR[t], mfc=mfc, mec=PAIR_COLOR[t], elinewidth=0.6, capsize=0)
+                         fmt='o', ms=4.5, color=soft(PAIR_COLOR[t]), mfc=mfc, mec=PAIR_COLOR[t], mew=POINT_EDGE, elinewidth=0.6, capsize=0)
     axB.plot([0, 1], [0, 1], 'k--', lw=0.7)
     axB.set_xlim(0, 1)
     axB.set_ylim(0, 1)
@@ -523,10 +541,10 @@ def figure2(res, out_dir: Path):
         q_src = pt2[pt2['source'] == a]['qualified'].values
         q_tgt = pt2[pt2['target'] == a]['qualified_tgt'].values
         for vals, qmask, dx, marker, alpha in [(as_src, q_src, -0.17, 'o', 1.0), (as_tgt, q_tgt, 0.17, 's', 0.65)]:
-            axD.scatter(np.full(qmask.sum(), i + dx), vals[qmask], s=14, color=col, marker=marker, edgecolor='k',
-                        linewidth=0.3, zorder=3, alpha=alpha)
+            axD.scatter(np.full(qmask.sum(), i + dx), vals[qmask], s=14, color=soft(col, POINT_ALPHA * alpha), marker=marker,
+                        edgecolor=col, linewidth=POINT_EDGE, zorder=3)
             axD.scatter(np.full((~qmask).sum(), i + dx), vals[~qmask], s=14, color='white', marker=marker, edgecolor=col,
-                        linewidth=0.6, zorder=3)
+                        linewidth=POINT_EDGE, zorder=3)
             if qmask.any():
                 axD.plot([i + dx - 0.13, i + dx + 0.13], [vals[qmask].mean()] * 2, color='k', lw=1.4, zorder=4)
     axD.axhline(0, color='k', ls='--', lw=0.7)
@@ -577,7 +595,8 @@ def session_legend(ax, sessions, loc='lower right'):
     ax.legend(handles=h, loc=loc, frameon=False, title='session')
 
 
-def strip_by_type_sessions(ax, tables, ycol, ylabel, zero_line=None, log=False, text_loc='top', show_n=True, color_by=None):
+def strip_by_type_sessions(ax, tables, ycol, ylabel, zero_line=None, log=False, text_loc='top', show_n=True, color_by=None,
+                           color_fn=point_color):
     """Like strip_by_type, but one marker shape per session."""
     rng = np.random.default_rng(0)
     pooled = pd.concat(tables, ignore_index=True)
@@ -587,9 +606,10 @@ def strip_by_type_sessions(ax, tables, ycol, ylabel, zero_line=None, log=False, 
             if sub.empty:
                 continue
             x = i + rng.uniform(-0.2, 0.2, len(sub))
-            col = [area_color(a) for a in sub[color_by]] if color_by else PAIR_COLOR[t]   # e.g. color_by='target'
-            ax.scatter(x, sub[ycol], s=16, marker=MARKERS[k % len(MARKERS)], c=col, edgecolor='k',
-                       linewidth=0.3, zorder=3)
+            ecol = [area_color(a) for a in sub[color_by]] if color_by else PAIR_COLOR[t]   # edges: full colour
+            col = [color_fn(a) for a in sub[color_by]] if color_by else soft(PAIR_COLOR[t])   # e.g. color_by='target'
+            ax.scatter(x, sub[ycol], s=16, marker=MARKERS[k % len(MARKERS)], c=col, edgecolor=ecol,
+                       linewidth=POINT_EDGE, zorder=3)
         sub = pooled[pooled['pair_type'] == t]
         if len(sub) > 1:
             m, se = sub[ycol].mean(), sub[ycol].std(ddof=1) / np.sqrt(len(sub))
@@ -702,7 +722,7 @@ def supp_figure1_pooled(results, out_dir: Path):
             typ = tab.iloc[p]['pair_type']
             axA.plot(ranks, curves[p], color=PAIR_COLOR[typ], lw=0.5, alpha=0.8)
             d = tab.iloc[p]['dim']
-            axA.plot(d, np.interp(d, ranks, curves[p]), marker='o', ms=2.4, color=PAIR_COLOR[typ], mec='k', mew=0.3, ls='')
+            axA.plot(d, np.interp(d, ranks, curves[p]), marker='o', ms=2.4, color=soft(PAIR_COLOR[typ]), mec=PAIR_COLOR[typ], mew=POINT_EDGE, ls='')
     axA.axhline(0, color='k', lw=0.6, ls=':')
     axA.set_xlim(0.5, n + 0.5)
     axA.set_xlabel('number of predictive dimensions (rank)')
@@ -741,8 +761,8 @@ def figure2_pooled(results, out_dir: Path):
     for k, t in enumerate(tables):
         for g in GROUP_COLOR:
             sub = t[t['source'].map(area_group) == g]        # boolean Series: safe when t is empty
-            axB.scatter(sub['source_acc_cv'], sub['excess'], s=18, marker=MARKERS[k % len(MARKERS)], color=GROUP_COLOR[g],
-                        edgecolor='k', linewidth=0.3)
+            axB.scatter(sub['source_acc_cv'], sub['excess'], s=18, marker=MARKERS[k % len(MARKERS)], color=soft(GROUP_COLOR[g]),
+                        edgecolor=GROUP_COLOR[g], linewidth=POINT_EDGE)
     axB.axhline(0, color='k', ls='--', lw=0.7)
     rho, pval = stats.spearmanr(pooled['source_acc_cv'], pooled['excess'])
     fit = stats.linregress(pooled['source_acc_cv'], pooled['excess'])
@@ -765,8 +785,8 @@ def figure2_pooled(results, out_dir: Path):
         for vals, dx, marker, alpha in [(src, -0.18, 'o', 1.0), (tgt, 0.18, 's', 0.65)]:
             if len(vals) == 0:
                 continue
-            axC.scatter(i + dx + rng.uniform(-0.08, 0.08, len(vals)), vals, s=13, marker=marker, color=col,
-                        edgecolor='k', linewidth=0.3, zorder=3, alpha=alpha)
+            axC.scatter(i + dx + rng.uniform(-0.08, 0.08, len(vals)), vals, s=13, marker=marker, color=soft(col, POINT_ALPHA * alpha),
+                        edgecolor=col, linewidth=POINT_EDGE, zorder=3)
             axC.plot([i + dx - 0.14, i + dx + 0.14], [vals.mean()] * 2, color='k', lw=1.4, zorder=4)
     axC.axhline(0, color='k', ls='--', lw=0.7)
     axC.set_xticks(range(len(order)))
@@ -798,13 +818,13 @@ def figure2_pooled(results, out_dir: Path):
     for k, t in enumerate(tables):
         for typ in PAIR_TYPES:
             sub = t[t['pair_type'] == typ]
-            axA.scatter(sub['cos_shuf_mean'], sub['cos'], s=18, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[typ],
-                        edgecolor='k', linewidth=0.3)
+            axA.scatter(sub['cos_shuf_mean'], sub['cos'], s=18, marker=MARKERS[k % len(MARKERS)], color=soft(PAIR_COLOR[typ]),
+                        edgecolor=PAIR_COLOR[typ], linewidth=POINT_EDGE)
     for k, t in enumerate(tables_t):
         for typ in PAIR_TYPES:
             sub = t[t['pair_type'] == typ]
-            axB.scatter(sub['cos_tgt_shuf_mean'], sub['cos_tgt'], s=18, marker=MARKERS[k % len(MARKERS)], color=PAIR_COLOR[typ],
-                        edgecolor='k', linewidth=0.3)
+            axB.scatter(sub['cos_tgt_shuf_mean'], sub['cos_tgt'], s=18, marker=MARKERS[k % len(MARKERS)], color=soft(PAIR_COLOR[typ]),
+                        edgecolor=PAIR_COLOR[typ], linewidth=POINT_EDGE)
     for ax in (axA, axB):
         ax.plot([0, 1], [0, 1], 'k--', lw=0.7)
         ax.set_xlim(0, 1)
@@ -838,7 +858,7 @@ def pooled_figures(results, out_dir: Path):
 
 def main(argv):
     code_dir = Path(__file__).resolve().parent
-    results_dir = Path(os.environ.get('RESULTS_DIR', code_dir.parent / 'results'))
+    results_dir = Path(os.environ.get('RESULTS_DIR', code_dir.parent / 'results_3sessions'))
     sessions = argv or sorted(p.parent.name for p in results_dir.glob('*/alignment_results.pkl'))
     results = []
     for sid in sessions:
