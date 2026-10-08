@@ -197,8 +197,12 @@ def place_letters(fig, axes, letters, dx=None):
         titles.append(title)
         if title is not None:
             fp = title.get_fontproperties()
-            (h1, d1), (hl, dl) = extent(title.get_text().split('\n')[0] or 'H', fp), extent('lp', fp)
-            cap_tops.append(title.get_window_extent(r).y1 - (max(h1, hl) - max(d1, dl)) + cap_height(fp))
+            try:                                    # the ascent matplotlib itself gave the first line (font metrics)
+                a1 = title._get_layout(r)[1][0][1][1]
+            except Exception:                       # private API changed: estimate from the glyph metrics
+                (h1, d1), (hl, dl) = extent(title.get_text().split('\n')[0] or 'H', fp), extent('lp', fp)
+                a1 = max(h1, hl) - max(d1, dl)
+            cap_tops.append(title.get_window_extent(r).y1 - a1 + cap_height(fp))
         else:
             cap_tops.append(ax.get_window_extent(r).y1 + 4 * fig.dpi / 72 + cap_height(letter_fp))
     xs, cap_tops = np.array(xs), np.array(cap_tops)

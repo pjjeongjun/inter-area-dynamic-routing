@@ -18,6 +18,9 @@ permutation tests, rebuilding the same preprocessing and unit subsamples as the 
   sub_acc_nc_* per pair: the same three quantities with a nearest-centroid reader instead of the LDA: the per-context
                means of the d subspace coordinates are taken from the training blocks and a held-out trial is assigned
                to the nearer mean (Euclidean distance; no covariance estimate, no fitted weights).
+  acc_nc_*     per area: the nearest-centroid reader on all MIN_UNITS units of the area (the per-context means of
+               the z-scored population vector), with the same folds, trial-shuffle and block-permutation nulls as
+               the LDA's acc_cv; `acc_nc_predictive` = accuracy above every block-permutation draw.
 
     DATACUBE_ROOT=... RESULTS_DIR=../results_3sessions python patch_cv_quality.py [session ...]
 """
@@ -92,6 +95,8 @@ def patch(session_dir: Path, root: Path):
     sub_acc_null = np.empty((K, P, m.N_ACC_PERMUTATIONS))
     sub_acc_block = np.empty((K, P, n_block))
     nc_acc, nc_null, nc_block = np.empty((K, P)), np.empty((K, P, m.N_ACC_PERMUTATIONS)), np.empty((K, P, n_block))
+    A = len(areas)
+    a_nc, a_nc_null, a_nc_block = np.empty((K, A)), np.empty((K, A, m.N_ACC_PERMUTATIONS)), np.empty((K, A, n_block))
     for k in range(K):
         tk = time.time()
         rng = npr.default_rng(k)
@@ -102,6 +107,13 @@ def patch(session_dir: Path, root: Path):
         assert abs(chk - res['acc_cv'][k, 0]) < 1e-9, (k, chk, res['acc_cv'][k, 0])
         for i, a in enumerate(areas):
             task_r2_cv[k, i] = axis_r2_cv(act[a], context, folds_ctx)
+            X = act[a]                         # nearest centroid on the full population vector
+            full = [(tr, te, X[tr], X[te]) for tr, te in folds_ctx]
+            a_nc[k, i] = cv_accuracy_from(full, context, 'nc')
+            for j in range(m.N_ACC_PERMUTATIONS):
+                a_nc_null[k, i, j] = cv_accuracy_from(full, label_perms[j], 'nc')
+            for j in range(n_block):
+                a_nc_block[k, i, j] = cv_accuracy_from([(tr, te, X[tr], X[te]) for tr, te in block_folds[j]], block_perms[j], 'nc')
         for p, (s, t) in enumerate(pairs):
             X, Y = act[s], act[t]
             alpha, d = m.select_alpha(X, Y), int(res['dims'][k, p])
@@ -141,6 +153,17 @@ def patch(session_dir: Path, root: Path):
     pt['sub_acc_nc_block_null_lo'], pt['sub_acc_nc_block_null_hi'] = nc_block_m.min(axis=1), nc_block_m.max(axis=1)
     pt['sub_acc_nc_block_p'] = [m.p_one_sided(nc_block_m[p], obs_nc[p]) for p in range(P)]
     pt['sub_acc_nc_predictive'] = obs_nc > pt['sub_acc_nc_block_null_hi'].values
+    # nearest-centroid reader per area (all units)
+    a_null_m, a_block_m = a_nc_null.mean(axis=0), a_nc_block.mean(axis=0)
+    res['acc_nc_cv'], res['acc_nc_null_mean'], res['acc_nc_block_null_mean'] = a_nc, a_null_m, a_block_m
+    obs_a = a_nc.mean(0)
+    at['acc_nc_cv'], at['acc_nc_cv_sd'] = obs_a, a_nc.std(0, ddof=1)
+    at['acc_nc_null_mean'] = a_null_m.mean(axis=1)
+    at['acc_nc_null_p'] = [m.p_one_sided(a_null_m[i], obs_a[i]) for i in range(A)]
+    at['acc_nc_block_null_mean'] = a_block_m.mean(axis=1)
+    at['acc_nc_block_null_lo'], at['acc_nc_block_null_hi'] = a_block_m.min(axis=1), a_block_m.max(axis=1)
+    at['acc_nc_block_p'] = [m.p_one_sided(a_block_m[i], obs_a[i]) for i in range(A)]
+    at['acc_nc_predictive'] = obs_a > at['acc_nc_block_null_hi'].values
     with open(session_dir / 'alignment_results.pkl', 'wb') as f:
         pickle.dump(res, f)
     at.to_csv(session_dir / 'task_axis_by_area.csv', index=False)
@@ -149,6 +172,7 @@ def patch(session_dir: Path, root: Path):
     print(f'{session_dir.parent.name}/{sid}: task CV R² {task_r2_cv.mean():.3f} (min {task_r2_cv.mean(0).min():.3f}), '
           f'subspace accuracy LDA {sub_acc.mean():.3f} ({n_up}/{P} above the block null), '
           f'nearest-centroid {nc_acc.mean():.3f} ({int(pt["sub_acc_nc_predictive"].sum())}/{P}); '
+          f'area nearest-centroid {a_nc.mean():.3f} ({int(at["acc_nc_predictive"].sum())}/{A} above the block null); '
           f'{(time.time() - t0) / 60:.1f} min', flush=True)
 
 
