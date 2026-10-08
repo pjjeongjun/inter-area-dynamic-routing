@@ -182,20 +182,22 @@ def acc_area_panel(ax, areas_tab, order):
 
 
 def figure_r1(results, out_dir, color_by='target'):
-    """color_by: 'target' (default) or 'source' -- which area of the pair colours the points in A and B."""
-    """Communication subspace: cross-validated R² per pair (A) and context decoded from it per pair (B); context axis
-    (LDA): context decoding accuracy per area instance (C); subspace minus source-area decoding per pair (D)."""
+    """Communication subspace: cross-validated R² per pair (A); context decoded from the subspace per pair with the
+    nearest-centroid reader (B) and with the LDA reader (C); context axis (LDA on all 30 units): decoding accuracy per
+    area instance (D); subspace minus source-population decoding per pair (E). color_by: 'target' (default) or
+    'source' -- which area of the pair colours the points in A-C."""
     tables = [qualify(r) for r in results]
     pooled = pd.concat(tables, ignore_index=True)
     areas_tab = pd.concat([r['area_table'] for r in results], ignore_index=True)
 
-    fig = plt.figure(figsize=(W, 8.4))
-    gs = fig.add_gridspec(3, 2, height_ratios=[1, 0.9, 0.9], hspace=0.72, wspace=0.42, left=0.12, right=0.985, top=0.95,
-                          bottom=0.06)
+    fig = plt.figure(figsize=(W, 9.6))
+    gs = fig.add_gridspec(3, 2, height_ratios=[1, 1, 0.95], hspace=0.62, wspace=0.42, left=0.12, right=0.985, top=0.955,
+                          bottom=0.055)
     axA, axB = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])
-    axC = fig.add_subplot(gs[1, :])
-    axD = fig.add_subplot(gs[2, 0])
-    axL = fig.add_subplot(gs[2, 1])                     # region, session and null legends (shared by every panel)
+    axC, axE = fig.add_subplot(gs[1, 0]), fig.add_subplot(gs[1, 1])
+    bottom = gs[2, :].subgridspec(1, 2, width_ratios=[1, 0.6], wspace=0.04)
+    axD = fig.add_subplot(bottom[0, 0])
+    axL = fig.add_subplot(bottom[0, 1])                 # region, session and null legends (shared by every panel)
     axL.axis('off')
 
     strip(axA, tables, 'r2_cv_dim', 'cross-validated R²\n(rank-d fit, held-out trials)', color_by=color_by)
@@ -208,9 +210,13 @@ def figure_r1(results, out_dir, color_by='target'):
     n_sig = int(pooled['r2_significant'].sum())
     axA.set_title(f'Comm. subspace: cross-validated R²\n{n_sig}/{len(pooled)} pairs > trial-shuffle null', loc='left')
 
-    subspace_decoding_panel(axB, tables, pooled, color_by=color_by, prefix=READER)
+    # B: nearest-centroid reader (no fitted weights); C: LDA reader, for comparison
+    for ax, prefix, name in ((axB, 'sub_acc_nc', 'nearest centroid'), (axC, 'sub_acc', 'LDA')):
+        subspace_decoding_panel(ax, tables, pooled, color_by=color_by, prefix=prefix)
+        second = ax.get_title(loc='left').split('\n')[-1]
+        ax.set_title(f'Comm. subspace: decoding ({name})\n{second}', loc='left')
 
-    acc_area_panel(axC, areas_tab, area_order(areas_tab['area'].unique()))
+    acc_area_panel(axD, areas_tab, area_order(areas_tab['area'].unique()))
     h = [Line2D([], [], marker='o', color='0.4', ls='', ms=4, label='Above null'),
          Line2D([], [], marker='o', mfc='white', mec='0.4', ls='', ms=4, label='Not above null')]
     leg_null = axL.legend(handles=h, loc='lower left', bbox_to_anchor=(0.0, 0.0), frameon=False, handletextpad=0.3,
@@ -221,9 +227,9 @@ def figure_r1(results, out_dir, color_by='target'):
     session_legend(axL, 'upper right', bbox_to_anchor=(1.0, 1.0), handletextpad=0.3, labelspacing=0.3, borderaxespad=0.0,
                    fontsize=5.5)
 
-    transmitted_context_panel(axD, pooled)
+    transmitted_context_panel(axE, pooled)
 
-    place_letters(fig, [axA, axB, axC, axD], 'ABCD', dx=-0.075)
+    place_letters(fig, [axA, axB, axC, axE, axD], 'ABCED', dx=-0.075)
     save(fig, out_dir / ('figure_R1_subspace_and_decoding.svg' if color_by == 'target' else f'figure_R1_subspace_and_decoding_by_{color_by}.svg'))
 
 
