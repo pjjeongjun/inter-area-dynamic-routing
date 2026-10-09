@@ -238,15 +238,15 @@ def acc_area_panel(ax, areas_tab, order, pre='acc'):
         d = areas_tab.loc[mask, f'{pre}_cv'] - areas_tab.loc[mask, f'{pre}_block_null_mean']
         p_grp = stats.wilcoxon(d).pvalue
         ax.text(np.mean([min(xs), max(xs)]), y_mark, stars(p_grp), ha='center', va='bottom', fontsize=8 if p_grp < 0.05 else 6.5)
-    head = 'Area population (nearest centroid)' if pre == 'acc_nc' else 'Context axis (LDA)'
-    ax.set_title(f'{head}: context decoding\nfrontal {fr.mean():.0%} vs. others {ot.mean():.0%}, {p_text(p_fr)}', loc='left')
+    head = 'Area population (nearest centroid)' if pre == 'acc_nc' else 'Context axis (LDA): context decoding'
+    ax.set_title(f'{head}\nfrontal {fr.mean():.0%} vs. others {ot.mean():.0%}, {p_text(p_fr)}', loc='left')
     return p_fr
 
 
 def figure_r1(results, out_dir, color_by='target'):
     """Communication subspace: cross-validated R² per pair (A); context decoded from the subspace per pair with READER
-    (nearest centroid by default) (B); context decoded from all 30 units of each area with the context axis (LDA) per area
-    instance (C); context decoded from each source area's 30 units vs. from its communication subspace, AREA_READER /
+    (nearest centroid by default) (B); context decoded from all 30 units of each area with AREA_READER (nearest centroid by
+    default) per area instance (C); context decoded from each source area's 30 units vs. from its communication subspace, AREA_READER /
     READER (both nearest centroid by default), one line per source area instance, next to C on the same y scale (D).
     color_by: 'target' (default) or 'source' -- which area of the pair colours the points in A-B."""
     tables = [add_source_reader(qualify(r), r) for r in results]
@@ -282,7 +282,9 @@ def figure_r1(results, out_dir, color_by='target'):
     second = axB.get_title(loc='left').split('\n')[-1]
     axB.set_title(f'Comm. subspace ({READER_NAME})\n{second}', loc='left')
 
-    acc_area_panel(axC, areas_tab, area_order(areas_tab['area'].unique()), pre='acc')   # C: context axis (LDA)
+    # C: area population read out with AREA_READER (nearest centroid by default, as in B and D). Qualification of pairs
+    # for Figure 2 still uses the LDA context axis (acc_predictive), the axis the alignment is measured with.
+    acc_area_panel(axC, areas_tab, area_order(areas_tab['area'].unique()), pre=AREA_READER)
     population_vs_subspace_panel(axD, pooled)
 
     # region and null legends side by side; session legend in its own row below them
