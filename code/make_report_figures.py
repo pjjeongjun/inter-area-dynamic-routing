@@ -248,8 +248,7 @@ def acc_area_panel(ax, areas_tab, order, pre='acc'):
 
 
 def figure_r1(results, out_dir, color_by='target'):
-    """Context decoded from all 30 units of each area with AREA_READER (nearest centroid by default) per area instance (A,
-    full width); context decoded from the communication subspace per pair with READER (nearest centroid by default) (B);
+    """Context decoded from all 30 units of each area with AREA_READER (nearest centroid by default) per area instance (A); context decoded from the communication subspace per pair with READER (nearest centroid by default) (B);
     context decoded from each source area's 30 units vs. from its communication subspace, one line per source area
     instance, same reader on both ends (C); the same with the source's private subspace (PRIVATE, patch_private_nc.py)
     instead of the 30 units (D). The cross-validated R² of the subspaces is Supplementary Figure 1A.
@@ -258,22 +257,22 @@ def figure_r1(results, out_dir, color_by='target'):
     pooled = pd.concat(tables, ignore_index=True)
     areas_tab = pd.concat([r['area_table'] for r in results], ignore_index=True)
 
-    # legends (region, null, session) fill the free cell beside D
+    # 2 x 2 panels (A, B / C, D; JeongJun, 2026-10-09), legends in rows below: region and null side by side, then the
+    # session legend with as many columns as fit the width
     kw = dict(handletextpad=0.3, labelspacing=0.25, columnspacing=1.0, borderaxespad=0.0, fontsize=5.5)
-    H = 10.6                                              # three rows of panels; legends beside D
+    leg_w = 0.865 * W
+    ses_ncol, ses_h = session_legend_layout(leg_w, title_fontsize=6, **kw)
+    H = 8.0 + ses_h + 0.08                                # 8.0 in: two rows of panels plus region / null legends
     fy = lambda y_in: y_in / H                            # figure fraction from inches above the bottom edge
     fig = plt.figure(figsize=(W, H))
-    gs = fig.add_gridspec(3, 2, width_ratios=[1.1, 0.9], hspace=0.62, wspace=0.3, left=0.12, right=0.985,
-                          top=1 - fy(0.44), bottom=fy(0.62))
-    axA = fig.add_subplot(gs[0, :])                       # A: all area instances need the full width
-    axB, axC = fig.add_subplot(gs[1, 0]), fig.add_subplot(gs[1, 1])
-    axD = fig.add_subplot(gs[2, 0])                       # D: private subspace vs. comm. subspace
-    axL = fig.add_subplot(gs[2, 1])                       # region, null and session legends
+    gs = fig.add_gridspec(2, 2, width_ratios=[1.1, 0.9], hspace=0.62, wspace=0.3, left=0.12, right=0.985,
+                          top=1 - fy(0.055 * 8.0), bottom=fy(0.19 * 8.0 + ses_h + 0.08))
+    axA, axB = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])
+    axC, axD = fig.add_subplot(gs[1, 0]), fig.add_subplot(gs[1, 1])   # same columns as A and B, so edges and letters align
+    axL = fig.add_axes([0.12, fy(0.04), 0.865, fy(0.09 * 8.0 + ses_h + 0.04)])   # region, null and session legends
     axL.axis('off')
-    leg_w = axL.get_position().width * W
-    ses_ncol, _ = session_legend_layout(leg_w, title_fontsize=6, **kw)
 
-    # A: area population read out with AREA_READER (nearest centroid by default, as in B and C). Qualification of pairs
+    # A: area population read out with AREA_READER (nearest centroid by default, as in B-D). Qualification of pairs
     # for Figure 2 still uses the LDA context axis (acc_predictive), the axis the alignment is measured with.
     acc_area_panel(axA, areas_tab, area_order(areas_tab['area'].unique()), pre=AREA_READER)
 
@@ -289,27 +288,17 @@ def figure_r1(results, out_dir, color_by='target'):
         axD.text(0.5, 0.5, 'private subspace not computed\n(run patch_private_nc.py)', ha='center', va='center',
                  transform=axD.transAxes, fontsize=7)
 
-    # region legend, then the null legend and the session legend stacked below it
-    reg = region_legend(axL, areas_tab['area'].unique(), loc='upper left', bbox_to_anchor=(0.0, 1.0), ncol=2, title_fontsize=6, **kw)
+    # region and null legends side by side; session legend in its own row below them
+    reg = region_legend(axL, areas_tab['area'].unique(), loc='upper left', bbox_to_anchor=(0.0, 1.0), ncol=3, title_fontsize=6, **kw)
     h = [Line2D([], [], marker='o', color='0.4', ls='', ms=4, label='Above null'),
          Line2D([], [], marker='o', mfc='white', mec='0.4', ls='', ms=4, label='Not above null')]
-    gap = fy(0.08) / axL.get_position().height
-    fig.canvas.draw()
-    r = fig.canvas.get_renderer()
-    y_nul = axL.transAxes.inverted().transform((0, reg.get_window_extent(r).y0))[1] - gap
-    nul = axL.legend(handles=h, loc='upper left', bbox_to_anchor=(0.0, y_nul), frameon=False, ncol=2, **kw)
+    nul = axL.legend(handles=h, loc='upper left', bbox_to_anchor=(0.86, 1.0), frameon=False, title=' ', title_fontsize=6, **kw)
     axL.add_artist(nul)
     fig.canvas.draw()
-    y_ses = axL.transAxes.inverted().transform((0, nul.get_window_extent(r).y0))[1] - gap
+    r = fig.canvas.get_renderer()
+    y_ses = axL.transAxes.inverted().transform((0, reg.get_window_extent(r).y0))[1] - fy(0.08) / axL.get_position().height
     session_legend(axL, 'upper left', bbox_to_anchor=(0.0, y_ses), title_fontsize=6, ncol=ses_ncol, **kw)
     axL.get_legend().get_title().set_text('Session')     # add_artist legends are not capitalized by place_letters
-    # bottom labels of the second row level: C's group labels at the height of B's x-axis label (same font size)
-    fig.canvas.draw()
-    r = fig.canvas.get_renderer()
-    top_b = axB.xaxis.label.get_window_extent(r).y1
-    for t in axC.texts:
-        if t.get_text() in ('Frontal source', 'Non-frontal source'):
-            t.xyann = (0, -(axC.get_window_extent(r).y0 - top_b) * 72 / fig.dpi)
 
     place_letters(fig, [axA, axB, axC, axD], 'ABCD', dx=-0.075)
     save(fig, out_dir / ('figure_R1_subspace_and_decoding.svg' if color_by == 'target' else f'figure_R1_subspace_and_decoding_by_{color_by}.svg'))
