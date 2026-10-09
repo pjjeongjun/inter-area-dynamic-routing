@@ -411,6 +411,26 @@ def paired_source_panel(ax, pooled, left, group_brackets=False, null=None):
     # JeongJun, 2026-10-09). As for the decoding calls elsewhere, '*' = the observed mean change lies beyond every
     # block-permutation draw in its direction (p = 1 / (draws + 1)); otherwise n.s. Without null, paired Wilcoxon.
     y_br, h = float(g[['pop', 'sub']].max().max()) + 0.05, 0.015
+    if left == 'private':
+        # Figure 1E: does each end carry context on its own? Per source group and end, Wilcoxon signed-rank across source
+        # instances on accuracy minus its block-permutation null mean (as the per-group marks in Figure 1B, 1C); marks at
+        # one common height above the points, the within-group bracket raised above them (JeongJun, 2026-10-09)
+        nul = (q.groupby(['session', 'source'], sort=False)
+               .agg(sub_null=(f'{READER}_block_null_mean', 'mean'), pop_null=(f'{PRIVATE}_acc_nc_block_null_mean', 'mean'))
+               .reset_index())
+        gn = g.merge(nul, on=['session', 'source'])
+        y_mark = y_br - 0.035                              # just above the highest point
+        y_br, h = y_br + 0.06, 0.012                       # bracket well above the marks, short feet
+        for fr in (True, False):
+            rows_g = gn[gn['frontal'] == fr]
+            for x, (acc, nm) in zip(POP_SUB_X[fr], (('pop', 'pop_null'), ('sub', 'sub_null'))):
+                diff = rows_g[acc] - rows_g[nm]
+                p_e = stats.wilcoxon(diff).pvalue if len(diff) > 1 and (diff != 0).any() else np.nan
+                ax.text(x, y_mark, stars(p_e) if np.isfinite(p_e) else 'n.s.', ha='center', va='bottom',
+                        fontsize=8 if np.isfinite(p_e) and p_e < 0.05 else 6.5)
+                print(f'  Figure 1E {"frontal" if fr else "non-frontal"} sources, '
+                      f'{"private" if acc == "pop" else "comm."} subspace: {100 * rows_g[acc].mean():.1f}% vs. block null '
+                      f'{100 * rows_g[nm].mean():.1f}%, Wilcoxon p = {p_e:.3g} (n = {len(diff)})')
     for fr in (True, False):
         x0, x1 = POP_SUB_X[fr]
         rows_g = g[g['frontal'] == fr]
