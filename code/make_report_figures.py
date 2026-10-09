@@ -201,7 +201,7 @@ def acc_area_panel(ax, areas_tab, order, pre='acc'):
     Instances of the same area (different sessions) are offset sideways. Coloured bars: mean over the frontal and the
     non-frontal area instances; bracket: Mann–Whitney test across area instances."""
     ax.set_xlim(-0.7, len(order) - 0.3)
-    ax.set_ylim(0.2, 1.0)
+    ax.set_ylim(0, 1.0)
     ax.yaxis.set_major_locator(MultipleLocator(0.2))   # 0-100%, ticks every 20% (JeongJun, 2026-10-09)
     # instances of one area recorded in several sessions sit side by side, far enough apart (on screen) that a marker
     # never touches the neighbouring instance's null bar
@@ -340,7 +340,7 @@ def population_vs_subspace_panel(ax, pooled):
     session. Each session's lines share one sideways offset. Bold lines: mean over all sources of each group (JeongJun, 2026-10-08: no filter on
     the source's own decoding); title: mean change (subspace − population) per group, Mann–Whitney across source
     instances."""
-    return paired_source_panel(ax, pooled, 'population', group_brackets=True)
+    return paired_source_panel(ax, pooled, 'population', group_brackets=False)   # no n.s. brackets (JeongJun, 2026-10-09)
 
 
 def private_vs_subspace_panel(ax, pooled):
@@ -364,7 +364,7 @@ def paired_source_panel(ax, pooled, left, group_brackets=False):
               frontal=('frontal_src', 'first'))
          .reset_index())
     g['d'] = g['sub'] - g['pop']
-    ax.set_ylim(0.2, 1.0)                                    # same range as panels B and C
+    ax.set_ylim(0, 1.0)                                      # 0-100%, as Figure 1C
     ax.yaxis.set_major_locator(MultipleLocator(0.2))   # 0-100%, ticks every 20% (JeongJun, 2026-10-09)
     ax.set_xlim(-0.35, 4.6)                                 # room for the last two-word tick label
     for fr in (True, False):
@@ -418,7 +418,11 @@ def paired_source_panel(ax, pooled, left, group_brackets=False):
         left_tick = f'Private\n(~{dim:.0f} dims)' if PRIVATE == 'priv_d' else f'Private\n(~{30 - dim:.0f} dims)'
     ax.set_xticklabels([left_tick, f'Communication\n(~{dim:.0f} dims)'] * 2)
     if left == 'private':
-        change_inset(ax, d_fr, d_ot, p_mw, y_top=min(0.455, float(g[['pop', 'sub']].min().min()) - 0.03))
+        # source type (between) x space (within: private vs. comm.) mixed ANOVA; with two within levels the interaction
+        # F equals the squared Student t of the slopes (comm. − private) between frontal and non-frontal sources
+        t_int, p_int = stats.ttest_ind(d_fr, d_ot)
+        f_int, df_int = t_int ** 2, len(d_fr) + len(d_ot) - 2
+        change_inset(ax, d_fr, d_ot, p_int, y_top=min(0.455, float(g[['pop', 'sub']].min().min()) - 0.03))
     # group labels a fixed distance below the two-line tick labels (tick length + pad + two text lines + gap, in points)
     tr = mtrans.blended_transform_factory(ax.transData, ax.transAxes)
     rc = plt.rcParams
@@ -428,15 +432,21 @@ def paired_source_panel(ax, pooled, left, group_brackets=False):
         ax.annotate(lab, xy=(np.mean(POP_SUB_X[fr]), 0), xycoords=tr, xytext=(0, -below), textcoords='offset points',
                     ha='center', va='top', fontsize=7, color=GROUP_COLOR['frontal' if fr else 'other'])
     ax.set_ylabel('context decoding accuracy\n(held-out blocks)')
-    ax.set_title(f'{"Population" if left == "population" else "Private"} vs. communication subspace\n'
+    if left == 'private':      # the slopes themselves are in the inset; the title gives the ANOVA interaction
+        ax.set_title(f'Private vs. communication subspace\n'
+                     f'Source type × space: F(1, {df_int}) = {f_int:.1f}, {p_text(p_int)}', loc='left')
+        print(f'  Figure 1 private panel: source type x space interaction F(1, {df_int}) = {f_int:.2f}, p = {p_int:.3g}; '
+              f'slopes frontal {100 * d_fr.mean():+.1f}, others {100 * d_ot.mean():+.1f} pts; Mann-Whitney p = {p_mw:.3g}')
+        return p_int
+    ax.set_title(f'Population vs. communication subspace\n'
                  f'Frontal {100 * d_fr.mean():+.1f} vs. others {100 * d_ot.mean():+.1f}, {p_text(p_mw)}', loc='left')
     return p_mw
 
 
 def change_inset(ax, d_fr, d_ot, p, y_top=0.455):
     """Inset of Figure 1E, in the empty band below 50%: mean change (comm. − private) per source group as horizontal
-    bars, ± SEM across source instances, one dot per source instance; bracket = Mann–Whitney frontal vs. non-frontal
-    sources (the p in the panel title)."""
+    bars, ± SEM across source instances, one dot per source instance; bracket = source type × space interaction of
+    the mixed ANOVA (frontal vs. non-frontal slopes; the F and p in the panel title)."""
     lo, hi = ax.get_ylim()
     top = (y_top - lo) / (hi - lo)                        # inset top under the 50% line and every line, in axes fraction
     ins = ax.inset_axes([0.27, top * 0.42, 0.6, top * 0.58])
@@ -653,7 +663,7 @@ def subspace_decoding_panel(ax, tables, pooled, color_by='target', prefix='sub_a
     source's own decoding), frontal / non-frontal source; bracket: their difference, p from permutations of the frontal label across source areas within each session
     (source_label_permutation_p). Asterisks under the x-axis labels: each pair type vs. its block-permutation null
     (Wilcoxon on accuracy − null mean, all pairs)."""
-    ax.set_ylim(0.2, 1.0)
+    ax.set_ylim(0, 1.0)
     ax.yaxis.set_major_locator(MultipleLocator(0.2))   # 0-100%, ticks every 20% (JeongJun, 2026-10-09)
     # within a pair type, each colour group of the color_by area has its own x, shared by all its pairs (as Figure 1A)
     ax.set_xlim(-0.5, len(PAIR_TYPES) - 0.5)
