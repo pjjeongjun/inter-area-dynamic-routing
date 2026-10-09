@@ -329,10 +329,10 @@ def strip_by_type(ax, table, ycol, ylabel, zero_line=None, y_err=None, show_mean
 
 # ----------------------------------------------------------------------------- figure 1
 def task_axis_panels(axA, axB, at, areas, xlabels, colors, sessions_of=None, sessions=None, null_band=True):
-    """A: task-axis in-sample R² per area; B: cross-validated (held-out blocks) decoding accuracy per area."""
+    """A: task-axis in-sample R² per area; B: cross-validated (held-out trials) decoding accuracy per area."""
     x = np.arange(len(areas))
     for ax, col, err, ylab in [(axA, 'task_r2', 'task_r2_sd', 'task-axis R²\n(variance of the projection explained by context)'),
-                               (axB, 'acc_cv', 'acc_cv_sd', 'context decoding accuracy\n(held-out blocks)')]:
+                               (axB, 'acc_cv', 'acc_cv_sd', 'context decoding accuracy\n(held-out trials)')]:
         for i, a in enumerate(areas):
             rows = at[at['area'] == a] if 'area' in at else at.loc[[a]]
             for _, r in rows.iterrows():
@@ -772,7 +772,7 @@ def figure2_pooled(results, out_dir: Path):
     fit = stats.linregress(pooled['source_acc_cv'], pooled['excess'])
     xfit = np.array([pooled['source_acc_cv'].min(), pooled['source_acc_cv'].max()])
     axB.plot(xfit, fit.intercept + fit.slope * xfit, color='k', lw=1.2, zorder=4)
-    axB.set_xlabel('source task axis: decoding accuracy (held-out blocks)')
+    axB.set_xlabel('source task axis: decoding accuracy (held-out trials)')
     axB.set_ylabel(ylab)
     axB.set_ylim(-0.3, max(0.7, pooled['excess'].max() + 0.05))
     axB.set_title(f'Alignment vs. context decoding of the source area\nSpearman ρ = {rho:.2f}, p = {pval:.2f}; line = least squares',

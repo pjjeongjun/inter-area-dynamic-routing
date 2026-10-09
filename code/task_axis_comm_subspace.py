@@ -26,9 +26,10 @@ Pipeline (see ``analyse_session`` for the exact order):
    barely enough are compared on equal footing.
 3. Task axis: one LDA axis per area (context = rewarded modality, visual vs auditory
    block), unit-normalised in the area's z-scored unit space. Its predictive accuracy
-   is balanced block-wise cross-validated decoding accuracy: one block of each context
-   is held out (9 folds for 3 + 3 blocks), an LDA with equal class priors is trained
-   on the remaining 2 + 2 blocks and tested on the two held-out blocks (since
+   is cross-validated decoding accuracy over stratified 10-fold held-out trials drawn from
+   every block (CONTEXT_CV='trial', since 2026-10-08), LDA with equal class priors. Before
+   that (CONTEXT_CV='block'): one block of each context held out (9 folds for 3 + 3 blocks),
+   trained on the remaining 2 + 2 blocks and tested on the two held-out blocks (since
    2026-10-06; before, leave-one-block-out with training-proportion priors, whose
    3-vs-2 imbalance biased accuracy below 50%). Two nulls: (a) the trial-shuffle null
    (labels permuted across trials, ``N_ACC_PERMUTATIONS`` draws), which ignores the
@@ -82,7 +83,7 @@ import numpy.random as npr
 import pandas as pd
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.linear_model import RidgeCV
-from sklearn.model_selection import KFold, LeaveOneGroupOut
+from sklearn.model_selection import KFold, LeaveOneGroupOut, StratifiedKFold
 
 # ----------------------------------------------------------------------------- settings
 MIN_UNITS = 30
@@ -90,6 +91,7 @@ NUISANCE_REGRESSORS = os.environ.get('NUISANCE_REGRESSORS', 'prev_stim,prev_resp
 N_SUBSAMPLES = 10
 ALPHA_GRID = np.logspace(-1, 4, 25)
 N_FOLDS = 10
+CONTEXT_CV = os.environ.get('CONTEXT_CV', 'trial')   # context decoding folds: 'trial' (default since 2026-10-08) or 'block'
 N_R2_PERMUTATIONS = 1000
 N_ACC_PERMUTATIONS = 200
 N_AXIS_PERMUTATIONS = 1000
@@ -254,6 +256,18 @@ def context_block_folds(labels, blocks):
             te = (blocks == b1) | (blocks == b2)
             folds.append((np.flatnonzero(~te), np.flatnonzero(te)))
     return folds
+
+
+def context_trial_folds(labels, n_folds=N_FOLDS, seed=0):
+    """Stratified trial-wise folds: N_FOLDS folds of held-out trials drawn from every block, each with the session's
+    context proportions (JeongJun, 2026-10-08: trial-wise CV for all analyses). Returns [(train_idx, test_idx), ...]."""
+    return list(StratifiedKFold(n_folds, shuffle=True, random_state=seed).split(np.zeros(len(labels)), labels))
+
+
+def context_folds(labels, blocks):
+    """Context decoding folds for every analysis: trial-wise (CONTEXT_CV='trial', default) or one held-out block per
+    context (CONTEXT_CV='block', the scheme used before 2026-10-08)."""
+    return context_trial_folds(labels) if CONTEXT_CV == 'trial' else context_block_folds(labels, blocks)
 
 
 def lda_cv_accuracy(X, labels, folds):
@@ -476,8 +490,8 @@ def analyse_session(trials, units, session_id, min_units=MIN_UNITS, n_subsamples
     block_perms = block_label_permutations(context, blocks)                      # block-permuted labels
     trial_perms = trial_permutations(len(reg), N_R2_PERMUTATIONS, seed=3000)     # target trials permuted, R² null
     n_block = len(block_perms)
-    folds_ctx = context_block_folds(context, blocks)                             # hold out one block per context
-    block_folds = [context_block_folds(lab, blocks) for lab in block_perms]       # same design under permuted labels
+    folds_ctx = context_folds(context, blocks)                                   # trial-wise (CONTEXT_CV)
+    block_folds = [context_folds(lab, blocks) for lab in block_perms]             # same design under permuted labels
     log(f'null draws: {N_ACC_PERMUTATIONS} trial-shuffled label sets (decoding), {N_AXIS_PERMUTATIONS} (axis), '
         f'{n_block} block permutations, {N_R2_PERMUTATIONS} trial permutations (R²)')
 

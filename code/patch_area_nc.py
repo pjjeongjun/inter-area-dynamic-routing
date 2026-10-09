@@ -28,8 +28,8 @@ def patch(session_dir: Path, root: Path):
     label_perms = m.label_permutations(context, m.N_ACC_PERMUTATIONS, seed=4000)   # same draws as patch_cv_quality
     block_perms = m.block_label_permutations(context, blocks)
     n_block = len(block_perms)
-    folds_ctx = m.context_block_folds(context, blocks)
-    block_folds = [m.context_block_folds(lab, blocks) for lab in block_perms]
+    folds_ctx = m.context_folds(context, blocks)
+    block_folds = [m.context_folds(lab, blocks) for lab in block_perms]
     A = len(areas)
     a_nc, a_nc_null, a_nc_block = np.empty((K, A)), np.empty((K, A, m.N_ACC_PERMUTATIONS)), np.empty((K, A, n_block))
     for k in range(K):

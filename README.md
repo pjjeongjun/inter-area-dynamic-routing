@@ -13,8 +13,9 @@ Per session, quiescent-window firing rates of QC-pass single units are z-scored 
 previous-trial stimulus / response / reward, running speed and pupil area are regressed
 out (`NUISANCE_REGRESSORS`; no condition-mean subtraction). Areas with at least 30 such
 units are kept and every area is subsampled to exactly 30 units, 10 times. For each area
-an LDA context axis is fit with balanced block-wise cross-validated decoding accuracy (one
-block of each context held out, equal priors), judged against a block-permutation null (labels
+an LDA context axis is fit with cross-validated decoding accuracy (stratified 10-fold held-out
+trials from every block, equal priors; `CONTEXT_CV=block` restores the earlier one-block-per-context
+folds), judged against a block-permutation null (labels
 permuted across whole blocks); for each ordered pair a
 reduced-rank-regression communication subspace is fit with 10-fold CV R² vs. rank and
 the 1-SEM dimensionality rule. Alignment is the norm of the unit context axis projected

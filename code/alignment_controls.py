@@ -92,8 +92,8 @@ def analyse_controls(session, trials, units, session_id, n_subsamples=m.N_SUBSAM
     label_perms = m.label_permutations(context, N_ACC_PERMUTATIONS, seed=1000)
     block_perms = m.block_label_permutations(context, blocks)
     n_block = len(block_perms)
-    folds_ctx = m.context_block_folds(context, blocks)
-    block_folds = [m.context_block_folds(lab, blocks) for lab in block_perms]
+    folds_ctx = m.context_folds(context, blocks)
+    block_folds = [m.context_folds(lab, blocks) for lab in block_perms]
     # one trial-wise permutation of the full label vector per draw, restricted to each split's half A: a trial keeps the
     # same shuffled label in every split, so the null averaged over splits has the same across-split dependence as the
     # observed cross-block cosine (independent permutations per split would shrink the null, as per-subsample ones did)

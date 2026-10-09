@@ -55,7 +55,7 @@ def patch(session_dir: Path, root: Path):
         rng = npr.default_rng(k)
         sub = {a: rng.choice(sua[sua['structure'] == a].index.values, size=m.MIN_UNITS, replace=False) for a in areas}
         act = {a: m.zscore(fr[sub[a]].values) for a in areas}
-        chk = m.lda_cv_accuracy(act[areas[0]], context, m.context_block_folds(context, blocks))
+        chk = m.lda_cv_accuracy(act[areas[0]], context, m.context_folds(context, blocks))
         assert abs(chk - res['acc_cv'][k, 0]) < 1e-9, (k, chk, res['acc_cv'][k, 0])
         for p, (s, t) in enumerate(pairs):
             X, Y = act[s], act[t]

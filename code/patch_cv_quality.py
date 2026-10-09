@@ -1,8 +1,12 @@
 """Add cross-validated fit-quality fields to existing alignment_results.pkl files without rerunning the
 permutation tests, rebuilding the same preprocessing and unit subsamples as the stored run:
 
-  Cross-validation is the balanced block-wise design of the main analysis: one block of each context is held
-  out (9 folds), models are fit on the remaining 2 + 2 blocks, and the LDA uses equal class priors.
+  Cross-validation follows m.CONTEXT_CV: stratified 10-fold held-out trials drawn from every block (default since
+  2026-10-08) or, with CONTEXT_CV=block, one block of each context held out (9 folds); the LDA uses equal class priors.
+
+  acc_*        per area: the main analysis's LDA context decoding (acc_cv, its trial-shuffle and block-permutation
+               nulls, acc_predictive), recomputed with these folds so that a change of CONTEXT_CV does not need the
+               full analysis rerun (the axes, subspaces and alignment do not depend on the decoding folds).
 
   task_r2_cv   per area: cross-validated predictive R² of the context axis. In each fold the axis and the
                per-context means of the projection are fit on the training blocks; the held-out blocks' projection
@@ -55,7 +59,7 @@ def subspace_projections(X, Y, alpha, d, folds):
 
 def cv_accuracy_from(proj, labels, decoder='lda'):
     """Context decoding on the subspace coordinates, pooled over held-out trials. decoder='lda': LDA with equal
-    priors; 'nc': nearest centroid (held-out trial -> the nearer of the two training-block context means)."""
+    priors; 'nc': nearest centroid (held-out trial -> the nearer of the two training-set context means)."""
     correct = total = 0
     for tr, te, Ztr, Zte in proj:
         if decoder == 'lda':
@@ -86,10 +90,11 @@ def patch(session_dir: Path, root: Path):
     sua = units[units['is_qc_pass'] & (units['decoder_label'] == 'sua')]
     P = len(pairs)
     label_perms = m.label_permutations(context, m.N_ACC_PERMUTATIONS, seed=4000)   # shared by every subsample
+    lda_perms = m.label_permutations(context, m.N_ACC_PERMUTATIONS, seed=1000)     # the main analysis's decoding null
     block_perms = m.block_label_permutations(context, blocks)
     n_block = len(block_perms)
-    folds_ctx = m.context_block_folds(context, blocks)                              # hold out one block per context
-    block_folds = [m.context_block_folds(lab, blocks) for lab in block_perms]        # same design under permuted labels
+    folds_ctx = m.context_folds(context, blocks)                              # trial-wise (CONTEXT_CV)
+    block_folds = [m.context_folds(lab, blocks) for lab in block_perms]        # same design under permuted labels
     task_r2_cv = np.empty((K, len(areas)))
     sub_acc = np.empty((K, P))
     sub_acc_null = np.empty((K, P, m.N_ACC_PERMUTATIONS))
@@ -97,15 +102,21 @@ def patch(session_dir: Path, root: Path):
     nc_acc, nc_null, nc_block = np.empty((K, P)), np.empty((K, P, m.N_ACC_PERMUTATIONS)), np.empty((K, P, n_block))
     A = len(areas)
     a_nc, a_nc_null, a_nc_block = np.empty((K, A)), np.empty((K, A, m.N_ACC_PERMUTATIONS)), np.empty((K, A, n_block))
+    acc_cv, acc_null, acc_block = np.empty((K, A)), np.empty((K, A, m.N_ACC_PERMUTATIONS)), np.empty((K, A, n_block))
     for k in range(K):
         tk = time.time()
         rng = npr.default_rng(k)
         sub = {a: rng.choice(sua[sua['structure'] == a].index.values, size=m.MIN_UNITS, replace=False) for a in areas}
         act = {a: m.zscore(fr[sub[a]].values) for a in areas}
-        # the rebuilt activity must reproduce the stored cross-validated accuracy of the first area
-        chk = m.lda_cv_accuracy(act[areas[0]], context, folds_ctx)
-        assert abs(chk - res['acc_cv'][k, 0]) < 1e-9, (k, chk, res['acc_cv'][k, 0])
+        # the rebuilt activity must reproduce the stored in-sample LDA accuracy of the first area (fold-independent)
+        chk = m.lda_axis(act[areas[0]], context)[1]
+        assert abs(chk - res['acc_train'][k, 0]) < 1e-9, (k, chk, res['acc_train'][k, 0])
         for i, a in enumerate(areas):
+            acc_cv[k, i] = m.lda_cv_accuracy(act[a], context, folds_ctx)
+            for j in range(m.N_ACC_PERMUTATIONS):
+                acc_null[k, i, j] = m.lda_cv_accuracy(act[a], lda_perms[j], folds_ctx)
+            for j in range(n_block):
+                acc_block[k, i, j] = m.lda_cv_accuracy(act[a], block_perms[j], block_folds[j])
             task_r2_cv[k, i] = axis_r2_cv(act[a], context, folds_ctx)
             X = act[a]                         # nearest centroid on the full population vector
             full = [(tr, te, X[tr], X[te]) for tr, te in folds_ctx]
@@ -153,6 +164,20 @@ def patch(session_dir: Path, root: Path):
     pt['sub_acc_nc_block_null_lo'], pt['sub_acc_nc_block_null_hi'] = nc_block_m.min(axis=1), nc_block_m.max(axis=1)
     pt['sub_acc_nc_block_p'] = [m.p_one_sided(nc_block_m[p], obs_nc[p]) for p in range(P)]
     pt['sub_acc_nc_predictive'] = obs_nc > pt['sub_acc_nc_block_null_hi'].values
+    # LDA context decoding per area (all units), as in the main analysis
+    l_null_m, l_block_m = acc_null.mean(axis=0), acc_block.mean(axis=0)
+    res['acc_cv'], res['acc_null_mean'], res['acc_block_null_mean'] = acc_cv, l_null_m, l_block_m
+    res['context_cv'] = m.CONTEXT_CV
+    obs_l = acc_cv.mean(0)
+    at['acc_cv'], at['acc_cv_sd'] = obs_l, acc_cv.std(0, ddof=1)
+    at['acc_null_mean'] = l_null_m.mean(axis=1)
+    at['acc_null_p'] = [m.p_one_sided(l_null_m[i], obs_l[i]) for i in range(A)]
+    at['acc_null_q975'] = np.quantile(l_null_m, 0.975, axis=1)
+    for i in range(A):
+        for key, val in m.null_summary(l_block_m[i], obs_l[i], 'acc_block_null', one_sided=True, extreme=True).items():
+            at.loc[i, key] = val
+    at['acc_block_p'] = at.pop('acc_block_null_p')
+    at['acc_predictive'] = obs_l > at['acc_block_null_hi'].values
     # nearest-centroid reader per area (all units)
     a_null_m, a_block_m = a_nc_null.mean(axis=0), a_nc_block.mean(axis=0)
     res['acc_nc_cv'], res['acc_nc_null_mean'], res['acc_nc_block_null_mean'] = a_nc, a_null_m, a_block_m
