@@ -165,36 +165,31 @@ def stars(p):
 
 
 # Group-level statistics (JeongJun, 2026-10-09): sessions (animals) are the independent units. Values are first averaged
-# within each session; the test is an exact two-sided sign-flip permutation over sessions (all 2^n sign patterns; random
-# 2^16 patterns when n > 16). Accuracies are expressed relative to their block-permutation null mean, so 0 = chance.
-def _signflip_p(s):
+# within each session; the test is a two-sided Wilcoxon signed-rank test over sessions (exact for n <= 25). Accuracies
+# are expressed relative to their block-permutation null mean, so 0 = chance.
+def _session_p(s):
     s = np.asarray(s, dtype=float)
-    n = len(s)
-    if n < 2:
+    s = s[np.isfinite(s)]
+    if len(s) < 2 or not np.any(s != 0):
         return np.nan
-    if n <= 16:
-        flips = 1 - 2 * ((np.arange(2 ** n)[:, None] >> np.arange(n)) & 1)
-    else:
-        flips = np.random.default_rng(0).choice([-1, 1], size=(2 ** 16, n))
-    null = flips @ s / n
-    return float(np.mean(np.abs(null) >= abs(s.mean()) - 1e-12))
+    return float(stats.wilcoxon(s, method='exact' if len(s) <= 25 else 'auto').pvalue)
 
 
-def session_signflip(values, sessions):
+def session_wilcoxon(values, sessions):
     """Is the mean of `values` different from 0 across sessions? Returns (mean over sessions, p, n sessions)."""
     s = pd.Series(np.asarray(values, dtype=float)).groupby(np.asarray(sessions)).mean().values
-    return float(s.mean()), _signflip_p(s), len(s)
+    return float(s.mean()), _session_p(s), len(s)
 
 
 def session_group_diff(values, sessions, mask):
-    """Frontal vs. non-frontal within session: per session that has both groups, mean(mask) − mean(~mask); sign-flip
-    over those sessions. Returns (mean difference, p, n sessions)."""
+    """Frontal vs. non-frontal within session: per session that has both groups, mean(mask) − mean(~mask); Wilcoxon
+    over those sessions (Wilcoxon). Returns (mean difference, p, n sessions)."""
     df = pd.DataFrame({'v': np.asarray(values, dtype=float), 's': np.asarray(sessions), 'm': np.asarray(mask, dtype=bool)})
     t = df.groupby(['s', 'm'])['v'].mean().unstack()
     if True not in t or False not in t:
         return np.nan, np.nan, 0
     d = (t[True] - t[False]).dropna().values
-    return (float(d.mean()) if len(d) else np.nan), _signflip_p(d), len(d)
+    return (float(d.mean()) if len(d) else np.nan), _session_p(d), len(d)
 
 
 def p_text(p):
@@ -232,8 +227,8 @@ def acc_area_panel(ax, areas_tab, order, pre='acc'):
     read out with the context axis (pre='acc': LDA, default) or nearest centroid (pre='acc_nc'); filled = above every
     draw of the block-permutation null (grey bar: that instance's null range, min to max over the 18 block permutations).
     Instances of the same area (different sessions) are offset sideways. Coloured bars: mean over the frontal and the
-    non-frontal area instances; bracket: frontal vs. non-frontal within session, session-level sign-flip test; marks over
-    each group: accuracy minus its block-permutation null mean, session-level sign-flip test."""
+    non-frontal area instances; bracket: frontal vs. non-frontal within session, session-level Wilcoxon test; marks over
+    each group: accuracy minus its block-permutation null mean, session-level Wilcoxon test."""
     ax.set_xlim(-0.7, len(order) - 0.3)
     ax.set_ylim(0, 1.0)
     ax.yaxis.set_major_locator(MultipleLocator(0.2))   # 0-100%, ticks every 20% (JeongJun, 2026-10-09)
@@ -262,7 +257,7 @@ def acc_area_panel(ax, areas_tab, order, pre='acc'):
     ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
     ax.set_xlabel('Area (colour: region)')
     ax.set_ylabel('context decoding accuracy\n(held-out blocks)')
-    # group means over area instances; frontal vs. non-frontal within session (session-level sign-flip)
+    # group means over area instances; frontal vs. non-frontal within session (session-level Wilcoxon)
     grp = areas_tab['area'].map(area_group)
     fr, ot = areas_tab.loc[grp == 'frontal', f'{pre}_cv'], areas_tab.loc[grp != 'frontal', f'{pre}_cv']
     _, p_fr, n_fr = session_group_diff(areas_tab[f'{pre}_cv'], areas_tab['session'], grp == 'frontal')
@@ -270,11 +265,11 @@ def acc_area_panel(ax, areas_tab, order, pre='acc'):
     i_fr = [i for i, a in enumerate(order) if area_group(a) == 'frontal']
     i_ot = [i for i, a in enumerate(order) if area_group(a) != 'frontal']
     group_bars_and_bracket(ax, i_fr, i_ot, fr.mean(), ot.mean(), p_fr, yb=0.945, h=0.015)
-    # each group vs. chance (accuracy − block-permutation null mean, session-level sign-flip); one common height
+    # each group vs. chance (accuracy − block-permutation null mean, session-level Wilcoxon); one common height
     y_mark = float((areas_tab[f'{pre}_cv'] + areas_tab[f'{pre}_cv_sd']).max()) + 0.012
     for xs, mask in ((i_fr, grp == 'frontal'), (i_ot, grp != 'frontal')):
         d = areas_tab.loc[mask, f'{pre}_cv'] - areas_tab.loc[mask, f'{pre}_block_null_mean']
-        m_grp, p_grp, n_grp = session_signflip(d, areas_tab.loc[mask, 'session'])
+        m_grp, p_grp, n_grp = session_wilcoxon(d, areas_tab.loc[mask, 'session'])
         print(f'  Figure 1C {"frontal" if xs is i_fr else "others"} vs. chance: {100 * m_grp:+.1f} pts, '
               f'session-level p = {p_grp:.3g} ({n_grp} sessions)')
         ax.text(np.mean([min(xs), max(xs)]), y_mark, stars(p_grp), ha='center', va='bottom', fontsize=8 if p_grp < 0.05 else 6.5)
@@ -441,7 +436,7 @@ def paired_source_panel(ax, pooled, left, group_brackets=False, null=None):
         ax.plot([x0, x1], [rows['pop'].mean(), rows['sub'].mean()], color=col, lw=1.6, zorder=5, solid_capstyle='butt',
                 path_effects=[pe.Stroke(linewidth=2.6, foreground='k'), pe.Normal()])
     d_fr, d_ot = g.loc[g['frontal'], 'd'], g.loc[~g['frontal'], 'd']
-    # frontal vs. non-frontal change, within session (session-level sign-flip; in the title / inset)
+    # frontal vs. non-frontal change, within session (session-level Wilcoxon; in the title / inset)
     _, p_mw, n_mw = session_group_diff(g['d'], g['session'], g['frontal'])
     # no frontal-vs-other brackets here (JeongJun, 2026-10-09); the group comparison of the change is in the title.
     # Within each source group: left end vs. subspace, tested against the block-permutation null of the same change
@@ -455,10 +450,10 @@ def paired_source_panel(ax, pooled, left, group_brackets=False, null=None):
         rows_g = g[g['frontal'] == fr]
         dd = rows_g['d']
         # change relative to the change expected under block-permuted labels (its null mean), then session-level
-        # sign-flip (JeongJun, 2026-10-09: session-level test for every group comparison)
+        # Wilcoxon (JeongJun, 2026-10-09: session-level test for every group comparison)
         base = (np.array([np.mean(null[(sid, a)]) for sid, a in zip(rows_g['session'], rows_g['source'])])
                 if null is not None else 0.0)
-        m_w, p_w, n_w = session_signflip(dd.values - base, rows_g['session'])
+        m_w, p_w, n_w = session_wilcoxon(dd.values - base, rows_g['session'])
         sig = np.isfinite(p_w) and p_w < 0.05
         print(f'  Figure 1 {left} vs. comm. subspace, {"frontal" if fr else "non-frontal"} sources: change '
               f'{100 * dd.mean():+.2f} pts ({100 * m_w:+.2f} relative to the block-permutation null, session means), '
@@ -487,7 +482,7 @@ def paired_source_panel(ax, pooled, left, group_brackets=False, null=None):
         left_tick = f'Private\n(~{dim:.0f} dims)' if PRIVATE == 'priv_d' else f'Private\n(~{30 - dim:.0f} dims)'
     ax.set_xticklabels([left_tick, f'Communication\n(~{dim:.0f} dims)'] * 2)
     if left == 'private':
-        # inset bracket: frontal vs. non-frontal change, within session (session-level sign-flip, as in the title)
+        # inset bracket: frontal vs. non-frontal change, within session (session-level Wilcoxon, as in the title)
         change_inset(ax, d_fr, d_ot, p_mw, y_top=min(0.455, float(g[['pop', 'sub']].min().min()) - 0.03))
     # group labels a fixed distance below the two-line tick labels (tick length + pad + two text lines + gap, in points)
     tr = mtrans.blended_transform_factory(ax.transData, ax.transAxes)
@@ -512,7 +507,7 @@ def paired_source_panel(ax, pooled, left, group_brackets=False, null=None):
 def change_inset(ax, d_fr, d_ot, p, y_top=0.455):
     """Inset of Figure 1E, in the empty band below 50%: mean change (comm. − private) per source group as horizontal
     bars, ± SEM across source instances, one dot per source instance; bracket = frontal vs. non-frontal change within
-    session (session-level sign-flip; the p in the panel title)."""
+    session (session-level Wilcoxon; the p in the panel title)."""
     lo, hi = ax.get_ylim()
     top = (y_top - lo) / (hi - lo)                        # inset top under the 50% line and every line, in axes fraction
     ins = ax.inset_axes([0.27, top * 0.42, 0.6, top * 0.58])
@@ -595,7 +590,7 @@ def excess_strip(ax, tables, col, chance_col, ylabel):
 def alignment_by_area_panel(ax, pooled, area_col, excess, order, frontal_mask, yb=0.74, color_col=None):
     color_col = color_col or area_col                    # which area of the pair gives the marker colour
     """Alignment excess (observed − chance cosine) per area, one point per qualified pair; coloured bars = mean over all
-    pairs whose plotted area is frontal / not frontal, compared by the bracket (within session, session-level sign-flip)."""
+    pairs whose plotted area is frontal / not frontal, compared by the bracket (within session, session-level Wilcoxon)."""
     rng = np.random.default_rng(0)
     for i, a in enumerate(order):
         sel = (pooled[area_col] == a).values
@@ -621,7 +616,7 @@ def alignment_by_area_panel(ax, pooled, area_col, excess, order, frontal_mask, y
     # frontal-vs-other comparison needs both groups (one session alone may have only one)
     if not i_fr or not i_ot or frontal_mask.sum() < 2 or (~frontal_mask).sum() < 2:
         return np.nan
-    _, p_fr, n_fr = session_group_diff(excess.values, pooled['session'].values, frontal_mask)   # session-level sign-flip
+    _, p_fr, n_fr = session_group_diff(excess.values, pooled['session'].values, frontal_mask)   # session-level Wilcoxon
     print(f'  Figure 2 {area_col} side frontal vs. others: {excess[frontal_mask].mean():.3f} vs. '
           f'{excess[~frontal_mask].mean():.3f}, session-level p = {p_fr:.3g} ({n_fr} sessions)')
     yb = max(yb, float(excess.max()) + 0.06)
@@ -683,11 +678,11 @@ def figure_r2(results, out_dir, color_by='target'):
                         c=[point_color(a) for a in t['source']], edgecolor=[area_color(a) for a in t['source']], linewidth=POINT_EDGE)
     axC.axhline(0, color='k', ls='--', lw=0.7)
     # Spearman correlation within each session (sessions with at least 4 qualified pairs), mean rho over sessions,
-    # session-level sign-flip test on the per-session rho (pooled least-squares line drawn for display only)
+    # session-level Wilcoxon test on the per-session rho (pooled least-squares line drawn for display only)
     rhos = [stats.spearmanr(t['source_acc_cv'], t['excess'])[0] for t in tables
             if len(t) >= 4 and t['source_acc_cv'].nunique() > 1]
     rhos = [r_ for r_ in rhos if np.isfinite(r_)]
-    rho, pval = (float(np.mean(rhos)), _signflip_p(rhos)) if rhos else (np.nan, np.nan)
+    rho, pval = (float(np.mean(rhos)), _session_p(rhos)) if rhos else (np.nan, np.nan)
     print(f'  Figure 2C alignment vs. decoding: mean within-session rho = {rho:.2f}, session-level p = {pval:.3g} '
           f'({len(rhos)} sessions)')
     fit = stats.linregress(pooled['source_acc_cv'], pooled['excess'])
