@@ -431,8 +431,8 @@ def paired_source_panel(ax, pooled, left):
         ax.annotate(lab, xy=(np.mean(POP_SUB_X[fr]), 0), xycoords=tr, xytext=(0, -below), textcoords='offset points',
                     ha='center', va='top', fontsize=7, color=GROUP_COLOR['frontal' if fr else 'other'])
     ax.set_ylabel('context decoding accuracy\n(held-out trials)')
-    ax.set_title(f'{"Population" if left == "population" else "Private subspace"} vs. comm. subspace\n'
-                 f'Frontal {100 * d_fr.mean():+.1f} vs. others {100 * d_ot.mean():+.1f} pts, {p_text(p_mw)}', loc='left')
+    ax.set_title(f'{"Population" if left == "population" else "Private"} vs. comm. subspace\n'
+                 f'Frontal {100 * d_fr.mean():+.1f} vs. others {100 * d_ot.mean():+.1f}, {p_text(p_mw)}', loc='left')
     return p_mw
 
 
