@@ -48,6 +48,9 @@ W = 6.5
 READER = os.environ.get('SUBSPACE_READER', 'sub_acc_nc')   # reader for Figure 1B/1D: 'sub_acc_nc' = nearest centroid, 'sub_acc' = LDA
 AREA_READER = 'acc_nc' if READER == 'sub_acc_nc' else 'acc'   # the same reader on all units of an area (Figure 1D)
 READER_NAME = 'nearest centroid' if READER == 'sub_acc_nc' else 'LDA'
+# private subspace of Figure 1D (patch_private_nc.py, nearest centroid): 'priv_d' = the d private directions of largest
+# variance (d-matched to the comm. subspace), 'priv_full' = the whole orthogonal complement (30 − d dims)
+PRIVATE = os.environ.get('PRIVATE_VARIANT', 'priv_d')
 
 
 def load_results(d=None):
@@ -354,12 +357,27 @@ def population_vs_subspace_panel(ax, pooled):
     onto the communication subspace (READER), averaged over that source's targets; same reader and held-out trials on
     both ends. Filled = the source's all-unit decoding is above every block-permutation draw, open = not; marker =
     session. Each session's lines share one sideways offset. Bold lines: mean over all sources of each group (JeongJun, 2026-10-08: no filter on
-    the source's own decoding); brackets: frontal vs. non-frontal sources for the population and for the subspace accuracy
-    (Mann–Whitney across source instances); title: mean change (subspace − population) per group, same test."""
+    the source's own decoding); title: mean change (subspace − population) per group, Mann–Whitney across source
+    instances."""
+    return paired_source_panel(ax, pooled, 'population')
+
+
+def private_vs_subspace_panel(ax, pooled):
+    """Is context concentrated in the communication subspace? As population_vs_subspace_panel, but the left end is the
+    source activity projected onto the private subspace (PRIVATE: by default the d private directions of largest
+    variance, d-matched to the subspace), nearest centroid on both ends, averaged over that source's targets. Filled =
+    the source's all-unit decoding is above every block-permutation draw (as in C)."""
+    return paired_source_panel(ax, pooled, 'private')
+
+
+def paired_source_panel(ax, pooled, left):
+    """Shared body of Figure 1C (left='population') and 1D (left='private')."""
     q = pooled.copy()
     q['frontal_src'] = q['pair_type'].str.startswith('frontal')
+    left_col = 'source_reader_acc' if left == 'population' else f'{PRIVATE}_acc_nc_cv'
+    agg = 'first' if left == 'population' else 'mean'      # population: one value per source; private: per pair
     g = (q.groupby(['session', 'source'], sort=False)
-         .agg(sub=(f'{READER}_cv', 'mean'), pop=('source_reader_acc', 'first'), pred=('source_reader_predictive', 'first'),
+         .agg(sub=(f'{READER}_cv', 'mean'), pop=(left_col, agg), pred=('source_reader_predictive', 'first'),
               frontal=('frontal_src', 'first'))
          .reset_index())
     g['d'] = g['sub'] - g['pop']
@@ -383,19 +401,17 @@ def population_vs_subspace_panel(ax, pooled):
                 path_effects=[pe.Stroke(linewidth=2.6, foreground='k'), pe.Normal()])
     d_fr, d_ot = g.loc[g['frontal'], 'd'], g.loc[~g['frontal'], 'd']
     p_mw = stats.mannwhitneyu(d_fr, d_ot).pvalue
-    # frontal vs. non-frontal sources within each readout: population bracket below, subspace bracket above it
-    y_top, h = float(g[['pop', 'sub']].max().max()), 0.015
-    for j, (col, yb) in enumerate((('pop', y_top + 0.035), ('sub', y_top + 0.105))):
-        p_t = stats.mannwhitneyu(g.loc[g['frontal'], col], g.loc[~g['frontal'], col]).pvalue
-        xa, xb = POP_SUB_X[True][j], POP_SUB_X[False][j]
-        ax.plot([xa, xa, xb, xb], [yb - h, yb, yb, yb - h], color='k', lw=0.8)
-        ax.text((xa + xb) / 2, yb + 0.003, stars(p_t), ha='center', va='bottom', fontsize=8 if p_t < 0.05 else 6.5)
+    # no frontal-vs-other brackets here (JeongJun, 2026-10-09); the group comparison of the change is in the title
     ax.axhline(0.5, color='k', ls='--', lw=0.7, zorder=1)
     ax.yaxis.set_major_locator(MultipleLocator(0.1))
     ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
     ax.set_xticks([*POP_SUB_X[True], *POP_SUB_X[False]])
     dim = pooled['dim'].median()
-    ax.set_xticklabels(['Population\n(30 units)', f'Subspace\n(~{dim:.0f} dims)'] * 2)
+    if left == 'population':
+        left_tick = 'Population\n(30 units)'
+    else:
+        left_tick = f'Private\n(~{dim:.0f} dims)' if PRIVATE == 'priv_d' else f'Private\n(~{30 - dim:.0f} dims)'
+    ax.set_xticklabels([left_tick, f'Subspace\n(~{dim:.0f} dims)'] * 2)
     # group labels a fixed distance below the two-line tick labels (tick length + pad + two text lines + gap, in points)
     tr = mtrans.blended_transform_factory(ax.transData, ax.transAxes)
     rc = plt.rcParams
@@ -405,7 +421,7 @@ def population_vs_subspace_panel(ax, pooled):
         ax.annotate(lab, xy=(np.mean(POP_SUB_X[fr]), 0), xycoords=tr, xytext=(0, -below), textcoords='offset points',
                     ha='center', va='top', fontsize=7, color=GROUP_COLOR['frontal' if fr else 'other'])
     ax.set_ylabel('context decoding accuracy\n(held-out trials)')
-    ax.set_title(f'Population vs. comm. subspace\n'
+    ax.set_title(f'{"Population" if left == "population" else "Private subspace"} vs. comm. subspace\n'
                  f'Frontal {100 * d_fr.mean():+.1f} vs. others {100 * d_ot.mean():+.1f} pts, {p_text(p_mw)}', loc='left')
     return p_mw
 
