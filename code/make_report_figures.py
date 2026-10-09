@@ -244,11 +244,11 @@ def acc_area_panel(ax, areas_tab, order, pre='acc'):
 
 
 def figure_r1(results, out_dir, color_by='target'):
-    """Communication subspace: cross-validated R² per pair (A); context decoded from the subspace per pair with READER
-    (nearest centroid by default) (B); context decoded from all 30 units of each area with AREA_READER (nearest centroid by
-    default) per area instance (C); context decoded from each source area's 30 units vs. from its communication subspace, AREA_READER /
-    READER (both nearest centroid by default), one line per source area instance, next to C on the same y scale (D).
-    color_by: 'target' (default) or 'source' -- which area of the pair colours the points in A-B."""
+    """Context decoded from all 30 units of each area with AREA_READER (nearest centroid by default) per area instance (A,
+    full width); context decoded from the communication subspace per pair with READER (nearest centroid by default) (B);
+    context decoded from each source area's 30 units vs. from its communication subspace, one line per source area
+    instance, same reader on both ends (C). The cross-validated R² of the subspaces is Supplementary Figure 1A.
+    color_by: 'target' (default) or 'source' -- which area of the pair colours the points in B."""
     tables = [add_source_reader(qualify(r), r) for r in results]
     pooled = pd.concat(tables, ignore_index=True)
     areas_tab = pd.concat([r['area_table'] for r in results], ignore_index=True)
@@ -260,32 +260,24 @@ def figure_r1(results, out_dir, color_by='target'):
     ses_ncol, ses_h = session_legend_layout(leg_w, title_fontsize=6, **kw)
     H = 8.0 + ses_h + 0.08                                # 8.0 in: panels plus region / null legends
     fy = lambda y_in: y_in / H                            # figure fraction from inches above the bottom edge
-    fig = plt.figure(figsize=(W, H))                      # near-square panels
-    gs = fig.add_gridspec(2, 2, width_ratios=[0.9, 1.1], hspace=0.62, wspace=0.3, left=0.12, right=0.985,
+    fig = plt.figure(figsize=(W, H))
+    gs = fig.add_gridspec(2, 2, width_ratios=[1.1, 0.9], hspace=0.62, wspace=0.3, left=0.12, right=0.985,
                           top=1 - fy(0.055 * 8.0), bottom=fy(0.19 * 8.0 + ses_h + 0.08))
-    axA, axB = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])
-    axC, axD = fig.add_subplot(gs[1, 0]), fig.add_subplot(gs[1, 1])   # same columns as A and B, so edges and letters align
+    axA = fig.add_subplot(gs[0, :])                       # A: all area instances need the full width
+    axB, axC = fig.add_subplot(gs[1, 0]), fig.add_subplot(gs[1, 1])
     axL = fig.add_axes([0.12, fy(0.04), 0.865, fy(0.09 * 8.0 + ses_h + 0.04)])   # region, null and session legends
     axL.axis('off')
 
-    cA = r2_swarm_panel(axA, tables, 'r2_cv_dim', 'cross-validated R²\n(rank-d fit, held-out trials)', color_by=color_by)
-    axA.set_xlabel('source → target')
-    counts = pooled['pair_type'].value_counts()
-    trA = mtrans.blended_transform_factory(axA.transData, axA.transAxes)
-    for i, t in enumerate(PAIR_TYPES):                  # n per pair type, in the empty band at the top of the axis
-        axA.text(cA[i], 0.97, f'n = {counts.get(t, 0)}', transform=trA, ha='center', va='top', fontsize=6)
-    n_sig = int(pooled['r2_significant'].sum())
-    axA.set_title(f'Comm. subspace: cross-validated R²\n{n_sig}/{len(pooled)} pairs > trial-shuffle null', loc='left')
+    # A: area population read out with AREA_READER (nearest centroid by default, as in B and C). Qualification of pairs
+    # for Figure 2 still uses the LDA context axis (acc_predictive), the axis the alignment is measured with.
+    acc_area_panel(axA, areas_tab, area_order(areas_tab['area'].unique()), pre=AREA_READER)
 
     # B: subspace read out with READER (nearest centroid by default: no fitted weights)
     subspace_decoding_panel(axB, tables, pooled, color_by=color_by, prefix=READER)
     second = axB.get_title(loc='left').split('\n')[-1]
     axB.set_title(f'Comm. subspace ({READER_NAME})\n{second}', loc='left')
 
-    # C: area population read out with AREA_READER (nearest centroid by default, as in B and D). Qualification of pairs
-    # for Figure 2 still uses the LDA context axis (acc_predictive), the axis the alignment is measured with.
-    acc_area_panel(axC, areas_tab, area_order(areas_tab['area'].unique()), pre=AREA_READER)
-    population_vs_subspace_panel(axD, pooled)
+    population_vs_subspace_panel(axC, pooled)
 
     # region and null legends side by side; session legend in its own row below them
     reg = region_legend(axL, areas_tab['area'].unique(), loc='upper left', bbox_to_anchor=(0.0, 1.0), ncol=3, title_fontsize=6, **kw)
@@ -298,15 +290,15 @@ def figure_r1(results, out_dir, color_by='target'):
     y_ses = axL.transAxes.inverted().transform((0, reg.get_window_extent(r).y0))[1] - fy(0.08) / axL.get_position().height
     session_legend(axL, 'upper left', bbox_to_anchor=(0.0, y_ses), title_fontsize=6, ncol=ses_ncol, **kw)
     axL.get_legend().get_title().set_text('Session')     # add_artist legends are not capitalized by place_letters
-    # bottom labels of the second row level: D's group labels at the height of C's x-axis label (same font size)
+    # bottom labels of the second row level: C's group labels at the height of B's x-axis label (same font size)
     fig.canvas.draw()
     r = fig.canvas.get_renderer()
-    top_c = axC.xaxis.label.get_window_extent(r).y1
-    for t in axD.texts:
+    top_b = axB.xaxis.label.get_window_extent(r).y1
+    for t in axC.texts:
         if t.get_text() in ('Frontal source', 'Non-frontal source'):
-            t.xyann = (0, -(axD.get_window_extent(r).y0 - top_c) * 72 / fig.dpi)
+            t.xyann = (0, -(axC.get_window_extent(r).y0 - top_b) * 72 / fig.dpi)
 
-    place_letters(fig, [axA, axB, axC, axD], 'ABCD', dx=-0.075)
+    place_letters(fig, [axA, axB, axC], 'ABC', dx=-0.075)
     save(fig, out_dir / ('figure_R1_subspace_and_decoding.svg' if color_by == 'target' else f'figure_R1_subspace_and_decoding_by_{color_by}.svg'))
 
 
@@ -419,36 +411,34 @@ def population_vs_subspace_panel(ax, pooled):
 
 
 def figure_rs1(results, out_dir):
-    """Supplementary Figure 1: how the communication-subspace dimensionality is chosen. Colour = region / frontal
-    subgroup of the target area, as in Figures R1 and R2."""
+    """Supplementary Figure 1: the communication subspaces. A: cross-validated R² at the chosen rank per pair (formerly
+    Figure 1A); B: the chosen dimensionality. Colour = region / frontal subgroup of the target area, as in Figures R1 and
+    R2; marker = session."""
     tables = [qualify(r) for r in results]
     pooled = pd.concat(tables, ignore_index=True)
-    n = results[0]['min_units']
-    fig = plt.figure(figsize=(W, 2.9))
-    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1, 0.5], wspace=0.36, left=0.09, right=0.99, top=0.84, bottom=0.2)
+    fig = plt.figure(figsize=(W, 3.9))
+    gs = fig.add_gridspec(2, 2, height_ratios=[1, 0.22], hspace=0.62, wspace=0.32, left=0.11, right=0.985, top=0.88,
+                          bottom=0.03)
     axA = fig.add_subplot(gs[0, 0])
     axB = fig.add_subplot(gs[0, 1])
-    axL = fig.add_subplot(gs[0, 2])
+    axL = fig.add_subplot(gs[1, :])                      # region legend in its own row below the panels
     axL.axis('off')
-    ranks = np.arange(1, n + 1)
-    for res, tab in zip(results, tables):
-        curves = res['r2_curve'].mean(axis=0)
-        for p in range(len(res['pairs'])):
-            tgt = tab.iloc[p]['target']
-            axA.plot(ranks, curves[p], color=area_color(tgt), lw=0.45, alpha=0.8)
-            d = tab.iloc[p]['dim']
-            axA.plot(d, np.interp(d, ranks, curves[p]), marker='o', ms=2.2, color=point_color(tgt), mec=area_color(tgt), mew=POINT_EDGE, ls='')
-    axA.axhline(0, color='k', lw=0.6, ls=':')
-    axA.set_xlim(0.5, n + 0.5)
-    axA.set_xlabel('Rank')
-    axA.set_ylabel('R² (cross-validated)')
-    axA.set_title('R² vs. rank', loc='left')
+
+    cA = r2_swarm_panel(axA, tables, 'r2_cv_dim', 'Cross-validated R²\n(rank-d fit, held-out trials)', color_by='target')
+    axA.set_xlabel('Source → target')
+    counts = pooled['pair_type'].value_counts()
+    trA = mtrans.blended_transform_factory(axA.transData, axA.transAxes)
+    for i, t in enumerate(PAIR_TYPES):                  # n per pair type, in the empty band at the top of the axis
+        axA.text(cA[i], 0.97, f'n = {counts.get(t, 0)}', transform=trA, ha='center', va='top', fontsize=6)
+    n_sig = int(pooled['r2_significant'].sum())
+    axA.set_title(f'Cross-validated R²\n{n_sig}/{len(pooled)} pairs > trial-shuffle null', loc='left')
+
     strip(axB, tables, 'dim', 'Dimensionality', color_by='target')
     axB.set_xlabel('Source → target')
     axB.set_ylim(0, 12)
     axB.set_title('Dimensionality', loc='left')
-    region_legend(axL, set(pooled['target']), loc='center left', bbox_to_anchor=(0.0, 0.5), handletextpad=0.3,
-                  labelspacing=0.3, borderaxespad=0.0, fontsize=5.5, title_fontsize=6)
+    region_legend(axL, set(pooled['target']), loc='upper left', bbox_to_anchor=(0.0, 1.0), ncol=4, handletextpad=0.3,
+                  labelspacing=0.25, columnspacing=1.0, borderaxespad=0.0, fontsize=5.5, title_fontsize=6)
     place_letters(fig, [axA, axB], 'AB', dx=-0.075)
     save(fig, out_dir / 'figure_S1_dimensionality.svg')
 
