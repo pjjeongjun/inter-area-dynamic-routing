@@ -26,12 +26,14 @@ Pipeline (see ``analyse_session`` for the exact order):
    barely enough are compared on equal footing.
 3. Task axis: one LDA axis per area (context = rewarded modality, visual vs auditory
    block), unit-normalised in the area's z-scored unit space. Its predictive accuracy
-   is cross-validated decoding accuracy over stratified 10-fold held-out trials drawn from
-   every block (CONTEXT_CV='trial', since 2026-10-08), LDA with equal class priors. Before
-   that (CONTEXT_CV='block'): one block of each context held out (9 folds for 3 + 3 blocks),
-   trained on the remaining 2 + 2 blocks and tested on the two held-out blocks (since
-   2026-10-06; before, leave-one-block-out with training-proportion priors, whose
-   3-vs-2 imbalance biased accuracy below 50%). Two nulls: (a) the trial-shuffle null
+   is cross-validated decoding accuracy with one block of each context held out
+   (CONTEXT_CV='block', default; 9 folds for 3 + 3 blocks), trained on the remaining 2 + 2
+   blocks and tested on the two held-out blocks, LDA with equal class priors (since
+   2026-10-06; before, leave-one-block-out with training-proportion priors, whose 3-vs-2
+   imbalance biased accuracy below 50%). CONTEXT_CV='trial' (stratified 10-fold held-out
+   trials from every block) was the default from 2026-10-08 to 2026-10-09 and was dropped
+   because its block-permutation null sits far above 50% (~73-83%): held-out trials share
+   their block's slow state with the training trials. Two nulls: (a) the trial-shuffle null
    (labels permuted across trials, ``N_ACC_PERMUTATIONS`` draws), which ignores the
    block structure of the labels, and (b) the block-permutation null (labels permuted
    across whole blocks, keeping three blocks per context; every assignment except the
@@ -91,7 +93,7 @@ NUISANCE_REGRESSORS = os.environ.get('NUISANCE_REGRESSORS', 'prev_stim,prev_resp
 N_SUBSAMPLES = 10
 ALPHA_GRID = np.logspace(-1, 4, 25)
 N_FOLDS = 10
-CONTEXT_CV = os.environ.get('CONTEXT_CV', 'trial')   # context decoding folds: 'trial' (default since 2026-10-08) or 'block'
+CONTEXT_CV = os.environ.get('CONTEXT_CV', 'block')   # context decoding folds: 'block' (default again since 2026-10-09) or 'trial'
 N_R2_PERMUTATIONS = 1000
 N_ACC_PERMUTATIONS = 200
 N_AXIS_PERMUTATIONS = 1000

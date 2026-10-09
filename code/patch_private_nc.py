@@ -47,8 +47,8 @@ def patch(session_dir: Path, root: Path):
         res = pickle.load(f)
     sid, areas, pairs, K = res['session_id'], res['areas'], res['pairs'], res['n_subsamples']
     m.NUISANCE_REGRESSORS = ','.join(res.get('nuisance_regressors', [])) or 'none'
-    if res.get('context_cv'):
-        m.CONTEXT_CV = res['context_cv']                                # same folds as the stored sub_acc_nc_cv
+    # same folds as the stored sub_acc_nc_cv; results without the field predate trial-wise CV, i.e. are block-wise
+    m.CONTEXT_CV = res.get('context_cv') or 'block'
     session = pynwb.read_nwb(m.find_nwb(root, sid))
     trials, units = session.trials[:], session.units[:]
     reg, fr, _, _ = m.preprocess(session, trials, units, log=lambda *a, **k: None)

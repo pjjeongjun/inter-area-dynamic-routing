@@ -1,8 +1,8 @@
 """Add cross-validated fit-quality fields to existing alignment_results.pkl files without rerunning the
 permutation tests, rebuilding the same preprocessing and unit subsamples as the stored run:
 
-  Cross-validation follows m.CONTEXT_CV: stratified 10-fold held-out trials drawn from every block (default since
-  2026-10-08) or, with CONTEXT_CV=block, one block of each context held out (9 folds); the LDA uses equal class priors.
+  Cross-validation follows m.CONTEXT_CV: one block of each context held out (CONTEXT_CV=block, default; 9 folds) or
+  stratified 10-fold held-out trials drawn from every block (CONTEXT_CV=trial); the LDA uses equal class priors.
 
   acc_*        per area: the main analysis's LDA context decoding (acc_cv, its trial-shuffle and block-permutation
                nulls, acc_predictive), recomputed with these folds so that a change of CONTEXT_CV does not need the
@@ -93,7 +93,7 @@ def patch(session_dir: Path, root: Path):
     lda_perms = m.label_permutations(context, m.N_ACC_PERMUTATIONS, seed=1000)     # the main analysis's decoding null
     block_perms = m.block_label_permutations(context, blocks)
     n_block = len(block_perms)
-    folds_ctx = m.context_folds(context, blocks)                              # trial-wise (CONTEXT_CV)
+    folds_ctx = m.context_folds(context, blocks)                              # block-wise by default (CONTEXT_CV)
     block_folds = [m.context_folds(lab, blocks) for lab in block_perms]        # same design under permuted labels
     task_r2_cv = np.empty((K, len(areas)))
     sub_acc = np.empty((K, P))
