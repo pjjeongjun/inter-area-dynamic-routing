@@ -202,7 +202,8 @@ def acc_area_panel(ax, areas_tab, order, pre='acc'):
     Instances of the same area (different sessions) are offset sideways. Coloured bars: mean over the frontal and the
     non-frontal area instances; bracket: Mann–Whitney test across area instances."""
     ax.set_xlim(-0.7, len(order) - 0.3)
-    ax.set_ylim(0.2, 1.0)
+    ax.set_ylim(0, 1.0)
+    ax.yaxis.set_major_locator(MultipleLocator(0.2))   # 0-100%, ticks every 20% (JeongJun, 2026-10-09)
     # instances of one area recorded in several sessions sit side by side, far enough apart (on screen) that a marker
     # never touches the neighbouring instance's null bar
     ms, lw_multi = 4.2, 2.4
@@ -250,26 +251,27 @@ def figure_r1(results, out_dir, color_by='target'):
     """Context decoded from all 30 units of each area with AREA_READER (nearest centroid by default) per area instance (A,
     full width); context decoded from the communication subspace per pair with READER (nearest centroid by default) (B);
     context decoded from each source area's 30 units vs. from its communication subspace, one line per source area
-    instance, same reader on both ends (C). The cross-validated R² of the subspaces is Supplementary Figure 1A.
+    instance, same reader on both ends (C); the same with the source's private subspace (PRIVATE, patch_private_nc.py)
+    instead of the 30 units (D). The cross-validated R² of the subspaces is Supplementary Figure 1A.
     color_by: 'target' (default) or 'source' -- which area of the pair colours the points in B."""
     tables = [add_source_reader(qualify(r), r) for r in results]
     pooled = pd.concat(tables, ignore_index=True)
     areas_tab = pd.concat([r['area_table'] for r in results], ignore_index=True)
 
-    # the session legend gets its own row below the region and null legends, with as many columns as fit the width; the
-    # figure grows by that row's height so the panels keep their size
+    # legends (region, null, session) fill the free cell beside D
     kw = dict(handletextpad=0.3, labelspacing=0.25, columnspacing=1.0, borderaxespad=0.0, fontsize=5.5)
-    leg_w = 0.865 * W
-    ses_ncol, ses_h = session_legend_layout(leg_w, title_fontsize=6, **kw)
-    H = 8.0 + ses_h + 0.08                                # 8.0 in: panels plus region / null legends
+    H = 10.6                                              # three rows of panels; legends beside D
     fy = lambda y_in: y_in / H                            # figure fraction from inches above the bottom edge
     fig = plt.figure(figsize=(W, H))
-    gs = fig.add_gridspec(2, 2, width_ratios=[1.1, 0.9], hspace=0.62, wspace=0.3, left=0.12, right=0.985,
-                          top=1 - fy(0.055 * 8.0), bottom=fy(0.19 * 8.0 + ses_h + 0.08))
+    gs = fig.add_gridspec(3, 2, width_ratios=[1.1, 0.9], hspace=0.62, wspace=0.3, left=0.12, right=0.985,
+                          top=1 - fy(0.44), bottom=fy(0.62))
     axA = fig.add_subplot(gs[0, :])                       # A: all area instances need the full width
     axB, axC = fig.add_subplot(gs[1, 0]), fig.add_subplot(gs[1, 1])
-    axL = fig.add_axes([0.12, fy(0.04), 0.865, fy(0.09 * 8.0 + ses_h + 0.04)])   # region, null and session legends
+    axD = fig.add_subplot(gs[2, 0])                       # D: private subspace vs. comm. subspace
+    axL = fig.add_subplot(gs[2, 1])                       # region, null and session legends
     axL.axis('off')
+    leg_w = axL.get_position().width * W
+    ses_ncol, _ = session_legend_layout(leg_w, title_fontsize=6, **kw)
 
     # A: area population read out with AREA_READER (nearest centroid by default, as in B and C). Qualification of pairs
     # for Figure 2 still uses the LDA context axis (acc_predictive), the axis the alignment is measured with.
@@ -281,16 +283,24 @@ def figure_r1(results, out_dir, color_by='target'):
     axB.set_title(f'Comm. subspace ({READER_NAME})\n{second}', loc='left')
 
     population_vs_subspace_panel(axC, pooled)
+    if all(f'{PRIVATE}_acc_nc_cv' in t for t in tables):
+        private_vs_subspace_panel(axD, pooled)
+    else:
+        axD.text(0.5, 0.5, 'private subspace not computed\n(run patch_private_nc.py)', ha='center', va='center',
+                 transform=axD.transAxes, fontsize=7)
 
-    # region and null legends side by side; session legend in its own row below them
-    reg = region_legend(axL, areas_tab['area'].unique(), loc='upper left', bbox_to_anchor=(0.0, 1.0), ncol=3, title_fontsize=6, **kw)
+    # region legend, then the null legend and the session legend stacked below it
+    reg = region_legend(axL, areas_tab['area'].unique(), loc='upper left', bbox_to_anchor=(0.0, 1.0), ncol=2, title_fontsize=6, **kw)
     h = [Line2D([], [], marker='o', color='0.4', ls='', ms=4, label='Above null'),
          Line2D([], [], marker='o', mfc='white', mec='0.4', ls='', ms=4, label='Not above null')]
-    nul = axL.legend(handles=h, loc='upper left', bbox_to_anchor=(0.86, 1.0), frameon=False, title=' ', title_fontsize=6, **kw)
-    axL.add_artist(nul)
+    gap = fy(0.08) / axL.get_position().height
     fig.canvas.draw()
     r = fig.canvas.get_renderer()
-    y_ses = axL.transAxes.inverted().transform((0, reg.get_window_extent(r).y0))[1] - fy(0.08) / axL.get_position().height
+    y_nul = axL.transAxes.inverted().transform((0, reg.get_window_extent(r).y0))[1] - gap
+    nul = axL.legend(handles=h, loc='upper left', bbox_to_anchor=(0.0, y_nul), frameon=False, ncol=2, **kw)
+    axL.add_artist(nul)
+    fig.canvas.draw()
+    y_ses = axL.transAxes.inverted().transform((0, nul.get_window_extent(r).y0))[1] - gap
     session_legend(axL, 'upper left', bbox_to_anchor=(0.0, y_ses), title_fontsize=6, ncol=ses_ncol, **kw)
     axL.get_legend().get_title().set_text('Session')     # add_artist legends are not capitalized by place_letters
     # bottom labels of the second row level: C's group labels at the height of B's x-axis label (same font size)
@@ -301,7 +311,7 @@ def figure_r1(results, out_dir, color_by='target'):
         if t.get_text() in ('Frontal source', 'Non-frontal source'):
             t.xyann = (0, -(axC.get_window_extent(r).y0 - top_b) * 72 / fig.dpi)
 
-    place_letters(fig, [axA, axB, axC], 'ABC', dx=-0.075)
+    place_letters(fig, [axA, axB, axC, axD], 'ABCD', dx=-0.075)
     save(fig, out_dir / ('figure_R1_subspace_and_decoding.svg' if color_by == 'target' else f'figure_R1_subspace_and_decoding_by_{color_by}.svg'))
 
 
@@ -381,7 +391,8 @@ def paired_source_panel(ax, pooled, left):
               frontal=('frontal_src', 'first'))
          .reset_index())
     g['d'] = g['sub'] - g['pop']
-    ax.set_ylim(0.2, 1.0)                                     # same range as panels B and C
+    ax.set_ylim(0, 1.0)                                     # same range as panels B and C
+    ax.yaxis.set_major_locator(MultipleLocator(0.2))   # 0-100%, ticks every 20% (JeongJun, 2026-10-09)
     ax.set_xlim(-0.5, 3.6)
     for fr in (True, False):
         col = GROUP_COLOR['frontal' if fr else 'other']
@@ -401,9 +412,19 @@ def paired_source_panel(ax, pooled, left):
                 path_effects=[pe.Stroke(linewidth=2.6, foreground='k'), pe.Normal()])
     d_fr, d_ot = g.loc[g['frontal'], 'd'], g.loc[~g['frontal'], 'd']
     p_mw = stats.mannwhitneyu(d_fr, d_ot).pvalue
-    # no frontal-vs-other brackets here (JeongJun, 2026-10-09); the group comparison of the change is in the title
+    # no frontal-vs-other brackets here (JeongJun, 2026-10-09); the group comparison of the change is in the title.
+    # Within each source group: left end vs. subspace, paired Wilcoxon signed-rank across source instances, one bracket
+    # per group spanning its two columns, at a common height above all lines (JeongJun, 2026-10-09)
+    y_br, h = float(g[['pop', 'sub']].max().max()) + 0.05, 0.015
+    for fr in (True, False):
+        x0, x1 = POP_SUB_X[fr]
+        dd = g.loc[g['frontal'] == fr, 'd']
+        p_w = stats.wilcoxon(dd).pvalue if len(dd) > 1 and (dd != 0).any() else np.nan
+        ax.plot([x0, x0, x1, x1], [y_br - h, y_br, y_br, y_br - h], color='k', lw=0.8)
+        ax.text((x0 + x1) / 2, y_br + 0.003, stars(p_w) if np.isfinite(p_w) else 'n.s.', ha='center', va='bottom',
+                fontsize=8 if np.isfinite(p_w) and p_w < 0.05 else 6.5)
     ax.axhline(0.5, color='k', ls='--', lw=0.7, zorder=1)
-    ax.yaxis.set_major_locator(MultipleLocator(0.1))
+    ax.yaxis.set_major_locator(MultipleLocator(0.2))
     ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
     ax.set_xticks([*POP_SUB_X[True], *POP_SUB_X[False]])
     dim = pooled['dim'].median()
@@ -604,7 +625,8 @@ def subspace_decoding_panel(ax, tables, pooled, color_by='target', prefix='sub_a
     source's own decoding), frontal / non-frontal source; bracket: their difference, p from permutations of the frontal label across source areas within each session
     (source_label_permutation_p). Asterisks under the x-axis labels: each pair type vs. its block-permutation null
     (Wilcoxon on accuracy − null mean, all pairs)."""
-    ax.set_ylim(0.2, 1.0)
+    ax.set_ylim(0, 1.0)
+    ax.yaxis.set_major_locator(MultipleLocator(0.2))   # 0-100%, ticks every 20% (JeongJun, 2026-10-09)
     # within a pair type, each colour group of the color_by area has its own x, shared by all its pairs (as Figure 1A)
     ax.set_xlim(-0.5, len(PAIR_TYPES) - 0.5)
     centres = np.arange(len(PAIR_TYPES), dtype=float)
