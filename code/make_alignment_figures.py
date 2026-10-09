@@ -170,11 +170,12 @@ def _cap_height_pt(size, weight):
     return _CAP_PT[key]
 
 
-def place_letters(fig, axes, letters, dx=None):
+def place_letters(fig, axes, letters, dx=None, align_columns=False):
     """Bold capital panel letters, aligned: y-axis labels of panels in the same grid column are aligned first, then each
     letter is left-aligned with the outer edge of its panel's y-axis label, and each letter's cap top is level with the
     cap top of the first line of its panel title (shared across a row of letters). Also capitalizes the axis labels.
-    dx is kept for compatibility and ignored."""
+    dx is kept for compatibility and ignored. align_columns: letters of panels in the same grid column share the
+    leftmost of their x positions (panels whose y-axis labels differ in width)."""
     capitalize_labels(fig)
     fig.canvas.draw()
     fig.align_ylabels([ax for ax in axes if ax.get_subplotspec() is not None])
@@ -206,6 +207,10 @@ def place_letters(fig, axes, letters, dx=None):
         else:
             cap_tops.append(ax.get_window_extent(r).y1 + 4 * fig.dpi / 72 + cap_height(letter_fp))
     xs, cap_tops = np.array(xs), np.array(cap_tops)
+    if align_columns:
+        cols = [ax.get_subplotspec().colspan.start if ax.get_subplotspec() is not None else -1 - i
+                for i, ax in enumerate(axes)]
+        xs = np.array([min(x for x, c2 in zip(xs, cols) if c2 == c) for c in cols])
 
     def snap(vals, tol, agg):
         out, groups = vals.copy(), []
@@ -329,10 +334,10 @@ def strip_by_type(ax, table, ycol, ylabel, zero_line=None, y_err=None, show_mean
 
 # ----------------------------------------------------------------------------- figure 1
 def task_axis_panels(axA, axB, at, areas, xlabels, colors, sessions_of=None, sessions=None, null_band=True):
-    """A: task-axis in-sample R² per area; B: cross-validated (held-out trials) decoding accuracy per area."""
+    """A: task-axis in-sample R² per area; B: cross-validated (held-out blocks) decoding accuracy per area."""
     x = np.arange(len(areas))
     for ax, col, err, ylab in [(axA, 'task_r2', 'task_r2_sd', 'task-axis R²\n(variance of the projection explained by context)'),
-                               (axB, 'acc_cv', 'acc_cv_sd', 'context decoding accuracy\n(held-out trials)')]:
+                               (axB, 'acc_cv', 'acc_cv_sd', 'context decoding accuracy\n(held-out blocks)')]:
         for i, a in enumerate(areas):
             rows = at[at['area'] == a] if 'area' in at else at.loc[[a]]
             for _, r in rows.iterrows():
@@ -772,7 +777,7 @@ def figure2_pooled(results, out_dir: Path):
     fit = stats.linregress(pooled['source_acc_cv'], pooled['excess'])
     xfit = np.array([pooled['source_acc_cv'].min(), pooled['source_acc_cv'].max()])
     axB.plot(xfit, fit.intercept + fit.slope * xfit, color='k', lw=1.2, zorder=4)
-    axB.set_xlabel('source task axis: decoding accuracy (held-out trials)')
+    axB.set_xlabel('source task axis: decoding accuracy (held-out blocks)')
     axB.set_ylabel(ylab)
     axB.set_ylim(-0.3, max(0.7, pooled['excess'].max() + 0.05))
     axB.set_title(f'Alignment vs. context decoding of the source area\nSpearman ρ = {rho:.2f}, p = {pval:.2f}; line = least squares',

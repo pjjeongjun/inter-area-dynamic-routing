@@ -68,7 +68,7 @@ def main():
     report_dir = out / 'report' / 'figures'; report_dir.mkdir(parents=True, exist_ok=True)
     maf.EXTRA_PNG_DIR = str(out / 'report' / 'figures_png')
     mrf.RESULTS_DIR, mrf.SESSIONS = out, [r['session_id'] for r in results]
-    mrf.figure_r1(results, report_dir); mrf.figure_rs1(results, report_dir); mrf.figure_r2(results, report_dir)
+    mrf.figure_r1(results, report_dir); mrf.figure_r2(results, report_dir)
     print(f'figures rebuilt from {len(results)} sessions -> {report_dir}')
     if failures:
         print('failed:', failures, file=sys.stderr)
