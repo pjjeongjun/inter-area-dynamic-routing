@@ -273,10 +273,10 @@ def figure_r1(results, out_dir, color_by='target'):
     # C: area population read out with AREA_READER (nearest centroid by default, as in D and E)
     acc_area_panel(axC, areas_tab, area_order(areas_tab['area'].unique()), pre=AREA_READER)
     # D: population vs. communication subspace, with frontal vs. non-frontal sources at each end
-    population_vs_subspace_panel(axD, pooled)
+    population_vs_subspace_panel(axD, pooled, null=block_null_changes(results, 'population'))
     # E: private vs. communication subspace
     if all(f'{PRIVATE}_acc_nc_cv' in t for t in tables):
-        private_vs_subspace_panel(axE, pooled)
+        private_vs_subspace_panel(axE, pooled, null=block_null_changes(results, 'private'))
     else:
         axE.text(0.5, 0.5, 'private subspace not computed\n(run patch_private_nc.py)', ha='center', va='center',
                  transform=axE.transAxes, fontsize=7)
@@ -332,7 +332,7 @@ def add_source_reader(pt, res):
 POP_SUB_X = {True: (0.0, 1.3), False: (2.6, 3.9)}   # (population, subspace) x positions: frontal, non-frontal source
 
 
-def population_vs_subspace_panel(ax, pooled):
+def population_vs_subspace_panel(ax, pooled, null=None):
     """Does restricting a source area to its communication subspace lose context? One line per source area instance:
     left end = context decoding from all 30 source units (AREA_READER), right end = from the source activity projected
     onto the communication subspace (READER), averaged over that source's targets; same reader and held-out blocks on
@@ -340,18 +340,38 @@ def population_vs_subspace_panel(ax, pooled):
     session. Each session's lines share one sideways offset. Bold lines: mean over all sources of each group (JeongJun, 2026-10-08: no filter on
     the source's own decoding); title: mean change (subspace − population) per group, Mann–Whitney across source
     instances."""
-    return paired_source_panel(ax, pooled, 'population', group_brackets=False)   # no n.s. brackets (JeongJun, 2026-10-09)
+    return paired_source_panel(ax, pooled, 'population', group_brackets=False, null=null)   # no n.s. brackets (JeongJun, 2026-10-09)
 
 
-def private_vs_subspace_panel(ax, pooled):
+def private_vs_subspace_panel(ax, pooled, null=None):
     """Is context concentrated in the communication subspace? As population_vs_subspace_panel, but the left end is the
     source activity projected onto the private subspace (PRIVATE: by default the d private directions of largest
     variance, d-matched to the subspace), nearest centroid on both ends, averaged over that source's targets. Filled =
     the source's all-unit decoding is above every block-permutation draw (as in C)."""
-    return paired_source_panel(ax, pooled, 'private')
+    return paired_source_panel(ax, pooled, 'private', null=null)
 
 
-def paired_source_panel(ax, pooled, left, group_brackets=False):
+def block_null_changes(results, left):
+    """Per source area instance, the change (comm. subspace − left end) recomputed under each block-permuted label set:
+    {(session, source): array over the block permutations}. Both ends use the same permutation draws (shared across
+    subsamples, averaged draw-wise), so this is the change expected from block-structured labels without context.
+    left='population': AREA_READER on all units; left='private': PRIVATE subspace, averaged over the source's targets."""
+    out = {}
+    for r in results:
+        sub_null = r[f'{READER}_block_null_mean']                         # (pairs, draws)
+        for i, a in enumerate(r['areas']):
+            ps = [k for k, (s, _) in enumerate(r['pairs']) if s == a]
+            if not ps:
+                continue
+            if left == 'population':
+                left_null = r[f'{AREA_READER}_block_null_mean'][i]           # (draws,)
+            else:
+                left_null = r[f'{PRIVATE}_acc_nc_block_null_mean'][ps].mean(0)
+            out[(r['session_id'], a)] = sub_null[ps].mean(0) - left_null
+    return out
+
+
+def paired_source_panel(ax, pooled, left, group_brackets=False, null=None):
     """Shared body of Figure 1D (left='population') and 1E (left='private'). group_brackets: also
     compare frontal vs. non-frontal sources at each end (Mann–Whitney across source instances), as upward-opening brackets
     in the empty band below 50% (JeongJun, 2026-10-09)."""
@@ -386,16 +406,29 @@ def paired_source_panel(ax, pooled, left, group_brackets=False):
     d_fr, d_ot = g.loc[g['frontal'], 'd'], g.loc[~g['frontal'], 'd']
     p_mw = stats.mannwhitneyu(d_fr, d_ot).pvalue
     # no frontal-vs-other brackets here (JeongJun, 2026-10-09); the group comparison of the change is in the title.
-    # Within each source group: left end vs. subspace, paired Wilcoxon signed-rank across source instances, one bracket
-    # per group spanning its two columns, at a common height above all lines (JeongJun, 2026-10-09)
+    # Within each source group: left end vs. subspace, tested against the block-permutation null of the same change
+    # (null: mean change over the group's sources under each block-permuted label set, both ends with the same draws;
+    # JeongJun, 2026-10-09). As for the decoding calls elsewhere, '*' = the observed mean change lies beyond every
+    # block-permutation draw in its direction (p = 1 / (draws + 1)); otherwise n.s. Without null, paired Wilcoxon.
     y_br, h = float(g[['pop', 'sub']].max().max()) + 0.05, 0.015
     for fr in (True, False):
         x0, x1 = POP_SUB_X[fr]
-        dd = g.loc[g['frontal'] == fr, 'd']
-        p_w = stats.wilcoxon(dd).pvalue if len(dd) > 1 and (dd != 0).any() else np.nan
+        rows_g = g[g['frontal'] == fr]
+        dd = rows_g['d']
+        if null is not None:
+            nd = np.mean([null[(sid, a)] for sid, a in zip(rows_g['session'], rows_g['source'])], axis=0)
+            obs = dd.mean()
+            n_beyond = int(np.sum(nd >= obs)) if obs > 0 else int(np.sum(nd <= obs))
+            p_w = (n_beyond + 1) / (len(nd) + 1)
+            sig = n_beyond == 0
+            print(f'  Figure 1 {left} vs. comm. subspace, {"frontal" if fr else "non-frontal"} sources: change '
+                  f'{100 * obs:+.2f} pts, block-permutation null {100 * nd.mean():+.2f} '
+                  f'[{100 * nd.min():+.2f}, {100 * nd.max():+.2f}] over {len(nd)} draws, p = {p_w:.3f}')
+        else:
+            p_w = stats.wilcoxon(dd).pvalue if len(dd) > 1 and (dd != 0).any() else np.nan
+            sig = np.isfinite(p_w) and p_w < 0.05
         ax.plot([x0, x0, x1, x1], [y_br - h, y_br, y_br, y_br - h], color='k', lw=0.8)
-        ax.text((x0 + x1) / 2, y_br + 0.003, stars(p_w) if np.isfinite(p_w) else 'n.s.', ha='center', va='bottom',
-                fontsize=8 if np.isfinite(p_w) and p_w < 0.05 else 6.5)
+        ax.text((x0 + x1) / 2, y_br + 0.003, '*' if sig else 'n.s.', ha='center', va='bottom', fontsize=8 if sig else 6.5)
     if group_brackets:                                   # frontal vs. non-frontal sources, population end and subspace end
         y_lo = min(0.5, float(g[['pop', 'sub']].min().min()))   # below every line and the 50% line
         for j, (col, yb) in enumerate((('pop', y_lo - 0.06), ('sub', y_lo - 0.15))):
